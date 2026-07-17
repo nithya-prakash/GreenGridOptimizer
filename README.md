@@ -29,4 +29,4 @@ Ensure you have Docker and docker-compose installed.
 ## Limitations and Next Steps
 - Currently focusing on a v1 with single-step forecasting. Multi-step forecasting is a stretch goal.
 - Relying on simple fallback (SMARD) if ENTSO-E data ingestion fails.
-- (Will be updated as project evolves)
+- (Will be updated as the project evolves)
