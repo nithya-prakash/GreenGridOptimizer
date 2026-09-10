@@ -6,22 +6,23 @@ import joblib
 from pathlib import Path
 from src.utils.logger import log
 from src.utils.config import settings
+from src.features.feature_engineering import GENERATION_COLUMNS
 
 # Prevent matplotlib from opening GUI windows
 import matplotlib
 matplotlib.use('Agg')
 
-def run_shap_analysis():
-    log.info("Starting SHAP analysis...")
-    
-    # Load best model
-    model_path = settings.PRODUCTION_MODEL_DIR / "model.pkl"
+def run_shap_analysis(target: str):
+    log.info(f"Starting SHAP analysis for {target}...")
+
+    # Load the production model for this target
+    model_path = settings.PRODUCTION_MODEL_DIR / f"model_{target}.pkl"
     if not model_path.exists():
-        log.error("Production model not found.")
+        log.error(f"Production model for {target} not found.")
         return
-        
+
     model = joblib.load(model_path)
-    
+
     # Load dataset
     features_path = settings.PROCESSED_DATA_DIR / "features.parquet"
     if not features_path.exists():
@@ -56,19 +57,19 @@ def run_shap_analysis():
         shap_values = explainer(X_test)
         
     log.info("SHAP values computed. Generating plots...")
-    
+
     # 1. Summary Plot (Dot)
     plt.figure(figsize=(10, 6))
     shap.summary_plot(shap_values, X_test, show=False)
     plt.tight_layout()
-    plt.savefig(settings.MODELS_DIR / "shap_summary.png")
+    plt.savefig(settings.MODELS_DIR / f"shap_summary_{target}.png")
     plt.close()
-    
+
     # 2. Bar Plot
     plt.figure(figsize=(10, 6))
     shap.plots.bar(shap_values, show=False)
     plt.tight_layout()
-    plt.savefig(settings.MODELS_DIR / "shap_bar.png")
+    plt.savefig(settings.MODELS_DIR / f"shap_bar_{target}.png")
     plt.close()
     
     # 3. Dependence Plot
@@ -88,23 +89,24 @@ def run_shap_analysis():
         if hasattr(shap.plots, 'scatter'):
             shap.plots.scatter(shap_values[:, top_feature], color=shap_values, show=False)
             plt.tight_layout()
-            plt.savefig(settings.MODELS_DIR / "shap_dependence.png")
+            plt.savefig(settings.MODELS_DIR / f"shap_dependence_{target}.png")
             plt.close()
     except Exception as e:
         log.warning(f"Failed to generate dependence plot: {e}")
-        
+
     # 4. Waterfall Plot for a single prediction (the very last hour)
     try:
         plt.figure(figsize=(10, 6))
         # Note: waterfall only works with single explanations
         shap.plots.waterfall(shap_values[-1], show=False)
         plt.tight_layout()
-        plt.savefig(settings.MODELS_DIR / "shap_waterfall_single.png")
+        plt.savefig(settings.MODELS_DIR / f"shap_waterfall_single_{target}.png")
         plt.close()
     except Exception as e:
         log.warning(f"Failed to generate waterfall plot: {e}")
-        
-    log.info("SHAP analysis completed successfully.")
+
+    log.info(f"SHAP analysis for {target} completed successfully.")
 
 if __name__ == "__main__":
-    run_shap_analysis()
+    for target in GENERATION_COLUMNS:
+        run_shap_analysis(target)

@@ -35,20 +35,18 @@ def train_and_evaluate():
     mlflow.set_tracking_uri(f"sqlite:///{settings.MLRUNS_DIR}/mlflow.db")
     mlflow.set_experiment("GreenGrid_Forecasting")
     
-    target_cols = ['wind_onshore'] # For v1, let's just focus on wind_onshore to keep it manageable
-    # Can expand to wind_offshore and solar
-    
+    target_cols = ['wind_onshore', 'wind_offshore', 'solar']
+
     # Prepare feature list for XGBoost (drop target columns and current timestamp generation)
     # Target columns start with target_
     drop_cols = [c for c in df.columns if c.startswith('target_')]
     X_train = train_df.drop(columns=drop_cols)
     X_test = test_df.drop(columns=drop_cols)
-    
-    best_overall_model = None
-    best_overall_mae = float('inf')
-    best_model_name = ""
-    
+
     for target in target_cols:
+        best_model = None
+        best_mae = float('inf')
+        best_model_name = ""
         y_train = train_df[f'target_{target}']
         y_test = test_df[f'target_{target}']
         y_test_actual = test_df[target].shift(-1).fillna(method='ffill') # actually y_test is exactly what we need
@@ -97,17 +95,21 @@ def train_and_evaluate():
             plot_predictions(y_test, preds, "XGBoost", target, settings.MODELS_DIR)
             plot_residuals(y_test, preds, "XGBoost", target, settings.MODELS_DIR)
             log.info(f"XGBoost metrics: {metrics}")
-            
-            if metrics["MAE"] < best_overall_mae:
-                best_overall_mae = metrics["MAE"]
-                best_overall_model = model.model
+
+            # Only XGBoost is saved to production: it's the only model here that takes
+            # the full engineered feature matrix, which is what the /forecast endpoint's
+            # recursive step-by-step prediction is built around. Prophet is trained and
+            # evaluated (logged/plotted above) for comparison but not served.
+            if metrics["MAE"] < best_mae:
+                best_mae = metrics["MAE"]
+                best_model = model.model
                 best_model_name = "XGBoost"
-                
-    # Save the best model
-    if best_overall_model is not None:
-        model_path = settings.PRODUCTION_MODEL_DIR / "model.pkl"
-        joblib.dump(best_overall_model, model_path)
-        log.info(f"Saved best model ({best_model_name}) to {model_path} with MAE: {best_overall_mae}")
-        
+
+        # Save the best model for this target
+        if best_model is not None:
+            model_path = settings.PRODUCTION_MODEL_DIR / f"model_{target}.pkl"
+            joblib.dump(best_model, model_path)
+            log.info(f"Saved best model ({best_model_name}) for {target} to {model_path} with MAE: {best_mae}")
+
 if __name__ == "__main__":
     train_and_evaluate()

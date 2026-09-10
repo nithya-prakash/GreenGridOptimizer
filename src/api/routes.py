@@ -18,18 +18,21 @@ from src.ingestion.weather_client import WeatherClient
 FORECAST_HISTORY_HOURS = 24 * 21
 MAX_FORECAST_HOURS_AHEAD = 72
 
+TARGETS = GENERATION_COLUMNS  # ['wind_onshore', 'wind_offshore', 'solar']
+
 router = APIRouter()
 
-# In-memory loaded model (lazy load)
-_model = None
+# In-memory loaded models, keyed by target (lazy load)
+_models: Dict[str, Any] = {}
 
-def get_model():
-    global _model
-    if _model is None:
-        model_path = settings.PRODUCTION_MODEL_DIR / "model.pkl"
-        if model_path.exists():
-            _model = joblib.load(model_path)
-    return _model
+def get_models() -> Dict[str, Any]:
+    """Loads and caches the production model for each modeled target."""
+    for target in TARGETS:
+        if target not in _models:
+            model_path = settings.PRODUCTION_MODEL_DIR / f"model_{target}.pkl"
+            if model_path.exists():
+                _models[target] = joblib.load(model_path)
+    return _models
 
 @router.get("/")
 def read_root():
@@ -42,22 +45,20 @@ def healthcheck():
 @router.get("/forecast", response_model=List[ForecastResponse])
 def get_forecast(region: str = "DE", hours_ahead: int = 24):
     """
-    Recursive multi-step forecast: the model predicts wind_onshore at t+1 from
-    features known at t (current weather + lags/rolling stats). To forecast further
-    than 1h out, each step's prediction is fed back in as the "current" generation
-    value for the next step, and real Open-Meteo *forecast* weather (not historical)
-    is used for the weather features of each future hour.
-
-    Known v1 limitation: only wind_onshore is modeled. wind_offshore and solar are
-    held at their last observed value for the weather-feature lags/rolling stats
-    (they are not forecast themselves).
+    Recursive multi-step forecast: each model predicts its target at t+1 from
+    features known at t (current weather + lags/rolling stats of wind_onshore,
+    wind_offshore, solar and weather). To forecast further than 1h out, each step's
+    three predictions are fed back in as the "current" generation values for the
+    next step, and real Open-Meteo *forecast* weather (not historical) is used for
+    the weather features of each future hour.
     """
     if not 1 <= hours_ahead <= MAX_FORECAST_HOURS_AHEAD:
         raise HTTPException(status_code=400, detail=f"hours_ahead must be between 1 and {MAX_FORECAST_HOURS_AHEAD}")
 
-    model = get_model()
-    if not model:
-        raise HTTPException(status_code=503, detail="Model not loaded")
+    models = get_models()
+    missing_models = [t for t in TARGETS if t not in models]
+    if missing_models:
+        raise HTTPException(status_code=503, detail=f"Model(s) not loaded for: {', '.join(missing_models)}")
 
     features_path = settings.PROCESSED_DATA_DIR / "features.parquet"
     if not features_path.exists():
@@ -93,29 +94,35 @@ def get_forecast(region: str = "DE", hours_ahead: int = 24):
                        "Historical data may be stale — re-run the ingestion pipeline."
             )
 
-    expected_feature_cols = getattr(model, "feature_names_in_", None)
+    expected_feature_cols = {t: getattr(m, "feature_names_in_", None) for t, m in models.items()}
     results = []
     current_ts = last_known_ts
 
     for step in range(hours_ahead):
         featured = compute_predictor_features(history)
         X = featured.iloc[[-1]].drop(columns=[c for c in featured.columns if c.startswith('target_')], errors='ignore')
-        if expected_feature_cols is not None:
-            X = X.reindex(columns=list(expected_feature_cols))
 
-        pred = float(model.predict(X)[0])
+        preds = {}
+        for target in TARGETS:
+            X_target = X
+            if expected_feature_cols[target] is not None:
+                X_target = X.reindex(columns=list(expected_feature_cols[target]))
+            preds[target] = float(models[target].predict(X_target)[0])
+
         predict_ts = current_ts + timedelta(hours=1)
-        results.append(ForecastResponse(timestamp=predict_ts, wind_onshore_mw=pred))
+        results.append(ForecastResponse(
+            timestamp=predict_ts,
+            wind_onshore_mw=preds['wind_onshore'],
+            wind_offshore_mw=preds['wind_offshore'],
+            solar_mw=preds['solar']
+        ))
 
         if step < hours_ahead - 1:
-            last_actual = history.iloc[-1]
             new_row = pd.Series(index=history.columns, dtype="float64", name=predict_ts)
             for col in WeatherClient.HOURLY_VARIABLES:
                 new_row[col] = weather_future.loc[predict_ts, col]
-            new_row['wind_onshore'] = pred
-            # wind_offshore/solar aren't modeled yet (see docstring) — persist last known value.
-            new_row['wind_offshore'] = last_actual['wind_offshore']
-            new_row['solar'] = last_actual['solar']
+            for target in TARGETS:
+                new_row[target] = preds[target]
             if 'is_generation_gap' in history.columns:
                 new_row['is_generation_gap'] = 0
             if 'has_long_gap' in history.columns:
@@ -128,13 +135,17 @@ def get_forecast(region: str = "DE", hours_ahead: int = 24):
     return results
 
 @router.get("/forecast/explain", response_model=ExplanationResponse)
-def explain_forecast(timestamp: str = None):
+def explain_forecast(target: str = "wind_onshore", timestamp: str = None):
     # For demo, explain the very last prediction we can make
-    model = get_model()
+    if target not in TARGETS:
+        raise HTTPException(status_code=400, detail=f"target must be one of: {', '.join(TARGETS)}")
+
+    models = get_models()
+    model = models.get(target)
     features_path = settings.PROCESSED_DATA_DIR / "features.parquet"
     if not model or not features_path.exists():
         raise HTTPException(status_code=503, detail="Model or data not available")
-        
+
     df = pd.read_parquet(features_path)
     latest_row = df.tail(1)
     drop_cols = [c for c in latest_row.columns if c.startswith('target_')]
@@ -157,6 +168,7 @@ def explain_forecast(timestamp: str = None):
     top_10 = sorted(contributions.items(), key=lambda x: abs(x[1]), reverse=True)[:10]
     
     return ExplanationResponse(
+        target=target,
         timestamp=datetime.now(),
         base_value=base_val,
         feature_contributions=dict(top_10)
@@ -197,18 +209,18 @@ def get_metrics():
 
 @router.get("/model/info", response_model=ModelInfoResponse)
 def get_model_info():
-    model = get_model()
-    if not model:
-        raise HTTPException(status_code=503, detail="Model not loaded")
-        
+    models = get_models()
+    if not models:
+        raise HTTPException(status_code=503, detail="No models loaded")
+
     features_path = settings.PROCESSED_DATA_DIR / "features.parquet"
     features_used = []
     if features_path.exists():
         df = pd.read_parquet(features_path)
         features_used = [c for c in df.columns if not c.startswith('target_')]
-        
+
     return ModelInfoResponse(
-        model_type=type(model).__name__,
+        models={target: type(model).__name__ for target, model in models.items()},
         training_date=str(datetime.now().date()), # Ideally fetched from mlflow
         features_used=features_used[:20] # Return first 20 just for brevity
     )

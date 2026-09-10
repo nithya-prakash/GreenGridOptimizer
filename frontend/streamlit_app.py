@@ -22,16 +22,19 @@ st.sidebar.subheader("Production Model Metrics")
 try:
     metrics_res = requests.get(f"{API_BASE}/metrics").json()
     model_info_res = requests.get(f"{API_BASE}/model/info").json()
-    
-    st.sidebar.write(f"**Model:** {model_info_res['model_type']}")
-    
+
+    for target, model_type in model_info_res['models'].items():
+        st.sidebar.write(f"**{target}:** {model_type}")
+
+    explain_target = st.sidebar.selectbox("Explain target", list(model_info_res['models'].keys()))
+
     # Assuming XGBoost is the best one based on our pipeline
     best_model_metrics = None
     for k, v in metrics_res.items():
-        if "XGBoost" in k:
+        if k.startswith(f"XGBoost_{explain_target}"):
             best_model_metrics = v
             break
-            
+
     if best_model_metrics:
         col1, col2 = st.sidebar.columns(2)
         col1.metric("MAE (MW)", f"{best_model_metrics.get('MAE', 0):.0f}")
@@ -39,6 +42,7 @@ try:
         col1.metric("RMSE", f"{best_model_metrics.get('RMSE', 0):.0f}")
         col2.metric("MAPE %", f"{best_model_metrics.get('MAPE', 0):.1f}")
 except Exception as e:
+    explain_target = "wind_onshore"
     st.sidebar.warning("Could not fetch metrics from API. Ensure backend is running.")
 
 # Main Dashboard
@@ -56,21 +60,28 @@ try:
     df_forecast['timestamp'] = pd.to_datetime(df_forecast['timestamp'])
     df_forecast.set_index('timestamp', inplace=True)
     
-    # Combine for plot
-    # Just wind onshore for demo
-    fig = px.line(title="Wind Onshore Generation (MW)")
-    fig.add_scatter(x=df_hist.index, y=df_hist['wind_onshore'], mode='lines', name='Actual')
-    fig.add_scatter(x=df_forecast.index, y=df_forecast['wind_onshore_mw'], mode='lines', name='Forecast', line=dict(dash='dash'))
-    st.plotly_chart(fig, use_container_width=True)
-    
+    # One chart per modeled generation source (wind_onshore, wind_offshore, solar)
+    sources = [
+        ("wind_onshore", "wind_onshore_mw", "Wind Onshore Generation (MW)"),
+        ("wind_offshore", "wind_offshore_mw", "Wind Offshore Generation (MW)"),
+        ("solar", "solar_mw", "Solar Generation (MW)"),
+    ]
+    cols = st.columns(3)
+    for (hist_col, forecast_col, title), col in zip(sources, cols):
+        with col:
+            fig = px.line(title=title)
+            fig.add_scatter(x=df_hist.index, y=df_hist[hist_col], mode='lines', name='Actual')
+            fig.add_scatter(x=df_forecast.index, y=df_forecast[forecast_col], mode='lines', name='Forecast', line=dict(dash='dash'))
+            st.plotly_chart(fig, use_container_width=True)
+
 except Exception as e:
     st.error(f"Failed to fetch data: {e}")
 
 st.markdown("---")
-st.header("Forecast Explainability (SHAP)")
+st.header(f"Forecast Explainability (SHAP) — {explain_target}")
 
 try:
-    explain_res = requests.get(f"{API_BASE}/forecast/explain").json()
+    explain_res = requests.get(f"{API_BASE}/forecast/explain", params={"target": explain_target}).json()
     st.write(f"**Base Value:** {explain_res['base_value']:.2f} MW")
     
     contribs = explain_res['feature_contributions']

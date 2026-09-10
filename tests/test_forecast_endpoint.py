@@ -47,12 +47,14 @@ def synthetic_history(tmp_path, monkeypatch):
     features_df.to_parquet(settings.PROCESSED_DATA_DIR / "features.parquet")
 
     drop_cols = [c for c in features_df.columns if c.startswith("target_")]
-    model = RandomForestRegressor(n_estimators=20, max_depth=4, random_state=0)
-    model.fit(features_df.drop(columns=drop_cols), features_df["target_wind_onshore"])
-    joblib.dump(model, settings.PRODUCTION_MODEL_DIR / "model.pkl")
+    X_train = features_df.drop(columns=drop_cols)
+    for target in ["wind_onshore", "wind_offshore", "solar"]:
+        model = RandomForestRegressor(n_estimators=20, max_depth=4, random_state=0)
+        model.fit(X_train, features_df[f"target_{target}"])
+        joblib.dump(model, settings.PRODUCTION_MODEL_DIR / f"model_{target}.pkl")
 
     import src.api.routes as routes
-    routes._model = None  # reset the lazily-loaded model cache between tests
+    routes._models.clear()  # reset the lazily-loaded model cache between tests
     return routes
 
 
@@ -102,9 +104,12 @@ def test_forecast_multi_step_is_real_recursive_forecast(synthetic_history, monke
     assert timestamps == sorted(timestamps)
     assert all((timestamps[i + 1] - timestamps[i]).total_seconds() == 3600 for i in range(23))
     assert all(np.isfinite(r.wind_onshore_mw) for r in results)
+    assert all(np.isfinite(r.wind_offshore_mw) for r in results)
+    assert all(np.isfinite(r.solar_mw) for r in results)
     # Predictions must vary across the day (a real forecast), not all be identical
     # (which would indicate the endpoint fell back to a static/mocked value).
     assert len(set(round(r.wind_onshore_mw, 3) for r in results)) > 1
+    assert len(set(round(r.solar_mw, 3) for r in results)) > 1
 
 
 def test_forecast_rejects_out_of_range_horizon(synthetic_history):
@@ -121,3 +126,34 @@ def test_forecast_missing_weather_coverage_raises_503(synthetic_history, monkeyp
     with pytest.raises(HTTPException) as exc_info:
         routes.get_forecast(hours_ahead=5)
     assert exc_info.value.status_code == 503
+
+
+def test_forecast_requires_all_target_models(synthetic_history, monkeypatch):
+    routes = synthetic_history
+    (settings.PRODUCTION_MODEL_DIR / "model_solar.pkl").unlink()
+    routes._models.clear()
+
+    with pytest.raises(HTTPException) as exc_info:
+        routes.get_forecast(hours_ahead=1)
+    assert exc_info.value.status_code == 503
+    assert "solar" in exc_info.value.detail
+
+
+def test_explain_forecast_defaults_to_wind_onshore(synthetic_history):
+    routes = synthetic_history
+    result = routes.explain_forecast()
+    assert result.target == "wind_onshore"
+    assert len(result.feature_contributions) == 10
+
+
+def test_explain_forecast_rejects_unknown_target(synthetic_history):
+    routes = synthetic_history
+    with pytest.raises(HTTPException) as exc_info:
+        routes.explain_forecast(target="nuclear")
+    assert exc_info.value.status_code == 400
+
+
+def test_model_info_lists_all_targets(synthetic_history):
+    routes = synthetic_history
+    info = routes.get_model_info()
+    assert set(info.models.keys()) == {"wind_onshore", "wind_offshore", "solar"}

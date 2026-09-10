@@ -9,7 +9,8 @@ class ForecastRequest(BaseModel):
 class ForecastResponse(BaseModel):
     timestamp: datetime
     wind_onshore_mw: float
-    # We can expand to others later
+    wind_offshore_mw: float
+    solar_mw: float
 
 class HistoricalRequest(BaseModel):
     region: str = "DE"
@@ -17,11 +18,12 @@ class HistoricalRequest(BaseModel):
     end_date: str
 
 class ModelInfoResponse(BaseModel):
-    model_type: str
+    models: Dict[str, str]  # target -> model type, e.g. {"wind_onshore": "XGBRegressor"}
     training_date: Optional[str]
     features_used: List[str]
 
 class ExplanationResponse(BaseModel):
+    target: str
     timestamp: datetime
     base_value: float
     feature_contributions: Dict[str, float]
