@@ -49,8 +49,7 @@ def train_and_evaluate():
         best_model_name = ""
         y_train = train_df[f'target_{target}']
         y_test = test_df[f'target_{target}']
-        y_test_actual = test_df[target].shift(-1).fillna(method='ffill') # actually y_test is exactly what we need
-        
+
         # --- Prophet (Base) ---
         with mlflow.start_run(run_name=f"Prophet_Base_{target}"):
             model = ProphetForecaster(use_regressors=False)

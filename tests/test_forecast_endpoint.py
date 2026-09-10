@@ -39,8 +39,11 @@ def synthetic_history(tmp_path, monkeypatch):
         "direct_radiation": np.clip(300 * np.sin((hours % 24 - 6) / 12 * np.pi), 0, None),
         "diffuse_radiation": np.clip(100 * np.sin((hours % 24 - 6) / 12 * np.pi), 0, None),
         "precipitation": rng.uniform(0, 1, n),
-        "is_generation_gap": 0,
-        "has_long_gap": 0,
+        # bool, matching clean_and_join's real output (not int) — a previous version of this
+        # fixture used int and missed a bug where concatenating a predicted row onto these
+        # bool columns silently upcast them to `object`, which XGBoost's predict() rejects.
+        "is_generation_gap": False,
+        "has_long_gap": False,
     }, index=idx)
 
     features_df = create_features(raw)

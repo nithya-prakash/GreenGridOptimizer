@@ -118,17 +118,19 @@ def get_forecast(region: str = "DE", hours_ahead: int = 24):
         ))
 
         if step < hours_ahead - 1:
-            new_row = pd.Series(index=history.columns, dtype="float64", name=predict_ts)
-            for col in WeatherClient.HOURLY_VARIABLES:
-                new_row[col] = weather_future.loc[predict_ts, col]
-            for target in TARGETS:
-                new_row[target] = preds[target]
+            # Built as a dict -> single-row DataFrame (not a uniformly-typed Series) so pandas
+            # infers a dtype per column. is_generation_gap/has_long_gap are genuinely bool in
+            # the historical data; concatenating a float64-cast copy of them onto history would
+            # silently upcast the column to `object`, which XGBoost's predict() then rejects.
+            new_row_data = {col: float(weather_future.loc[predict_ts, col]) for col in WeatherClient.HOURLY_VARIABLES}
+            new_row_data.update({target: float(preds[target]) for target in TARGETS})
             if 'is_generation_gap' in history.columns:
-                new_row['is_generation_gap'] = 0
+                new_row_data['is_generation_gap'] = False
             if 'has_long_gap' in history.columns:
-                new_row['has_long_gap'] = 0
+                new_row_data['has_long_gap'] = False
+            new_row_df = pd.DataFrame([new_row_data], index=[predict_ts])[history.columns]
 
-            history = pd.concat([history, new_row.to_frame().T])
+            history = pd.concat([history, new_row_df])
             history.index = pd.to_datetime(history.index)
             current_ts = predict_ts
 
