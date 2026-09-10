@@ -19,3 +19,4 @@ streamlit>=1.30.0
 mlflow>=2.9.0
 pytest>=8.0.0
 jupyterlab
+anthropic>=0.69.0

@@ -7,7 +7,8 @@ import joblib
 import json
 import sqlite3
 import shap
-from src.api.schemas import ForecastResponse, ModelInfoResponse, ExplanationResponse
+import anthropic
+from src.api.schemas import ForecastResponse, ModelInfoResponse, ExplanationResponse, ChatRequest, ChatResponse
 from src.utils.config import settings
 from src.features.feature_engineering import compute_predictor_features, GENERATION_COLUMNS
 from src.ingestion.weather_client import WeatherClient
@@ -17,6 +18,18 @@ from src.ingestion.weather_client import WeatherClient
 # truncated, low-variance window.
 FORECAST_HISTORY_HOURS = 24 * 21
 MAX_FORECAST_HOURS_AHEAD = 72
+
+CHAT_MODEL = "claude-opus-5"
+CHAT_SYSTEM_PROMPT = """You are the assistant embedded in the GreenGrid Optimizer dashboard, a \
+renewable energy generation forecasting tool for the German electricity grid (wind onshore, wind \
+offshore, and solar). Answer the user's question using ONLY the dashboard data provided below \
+(recent actuals, the current forecast, and SHAP feature contributions explaining one target's \
+latest prediction). Reference specific numbers and timestamps. When asked why generation is high \
+or low, ground the explanation in the SHAP contributions. If the data doesn't answer the question, \
+say so rather than guessing. Keep answers to 2-4 sentences.
+
+Dashboard data (JSON):
+{context_json}"""
 
 TARGETS = GENERATION_COLUMNS  # ['wind_onshore', 'wind_offshore', 'solar']
 
@@ -226,3 +239,38 @@ def get_model_info():
         training_date=str(datetime.now().date()), # Ideally fetched from mlflow
         features_used=features_used[:20] # Return first 20 just for brevity
     )
+
+@router.post("/chat", response_model=ChatResponse)
+def chat(request: ChatRequest):
+    """
+    Answers questions about the forecast currently shown on the dashboard. The caller
+    (the Streamlit frontend) passes the forecast/historical/SHAP data it already has as
+    `context` rather than this endpoint recomputing a forecast per chat message.
+    """
+    if not settings.ANTHROPIC_API_KEY:
+        raise HTTPException(status_code=503, detail="Chat is not configured: ANTHROPIC_API_KEY is not set.")
+
+    context_json = json.dumps(request.context, indent=2, default=str)[:12000]
+    system_prompt = CHAT_SYSTEM_PROMPT.format(context_json=context_json)
+    messages = [{"role": m.role, "content": m.content} for m in request.history]
+    messages.append({"role": "user", "content": request.message})
+
+    client = anthropic.Anthropic(api_key=settings.ANTHROPIC_API_KEY)
+    try:
+        response = client.messages.create(
+            model=CHAT_MODEL,
+            max_tokens=4096,
+            system=[{"type": "text", "text": system_prompt, "cache_control": {"type": "ephemeral"}}],
+            messages=messages,
+        )
+    except anthropic.AuthenticationError:
+        raise HTTPException(status_code=503, detail="Chat is not configured: invalid ANTHROPIC_API_KEY.")
+    except anthropic.RateLimitError:
+        raise HTTPException(status_code=429, detail="Rate limited by the Claude API. Try again shortly.")
+    except anthropic.APIConnectionError:
+        raise HTTPException(status_code=503, detail="Could not reach the Claude API.")
+    except anthropic.APIStatusError as e:
+        raise HTTPException(status_code=502, detail=f"Claude API error: {e.message}")
+
+    reply = next((block.text for block in response.content if block.type == "text"), "")
+    return ChatResponse(reply=reply)

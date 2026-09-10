@@ -51,6 +51,8 @@ except Exception as e:
 # Main Dashboard
 st.header("Forecast vs Actuals")
 
+hist_res = {}
+forecast_res = []
 try:
     # Fetch historical
     hist_res = requests.get(f"{API_BASE}/historical?region={region}&limit=72").json()
@@ -83,6 +85,7 @@ except Exception as e:
 st.markdown("---")
 st.header(f"Forecast Explainability (SHAP) — {explain_target}")
 
+explain_res = {}
 try:
     explain_res = requests.get(f"{API_BASE}/forecast/explain", params={"target": explain_target}).json()
     st.write(f"**Base Value:** {explain_res['base_value']:.2f} MW")
@@ -97,3 +100,50 @@ try:
     st.plotly_chart(fig2, use_container_width=True)
 except Exception as e:
     st.warning("Could not fetch SHAP explanations.")
+
+st.markdown("---")
+st.header("💬 Ask about the forecast")
+
+if "chat_history" not in st.session_state:
+    st.session_state.chat_history = []
+
+for msg in st.session_state.chat_history:
+    with st.chat_message(msg["role"]):
+        st.write(msg["content"])
+
+user_question = st.chat_input('Ask e.g. "Why is wind onshore low tomorrow morning?"')
+if user_question:
+    st.session_state.chat_history.append({"role": "user", "content": user_question})
+    with st.chat_message("user"):
+        st.write(user_question)
+
+    dashboard_context = {
+        "region": region,
+        "forecast_horizon_hours": hours_ahead,
+        "explain_target": explain_target,
+        "forecast": forecast_res,
+        "recent_actuals": hist_res,
+        "shap_explanation": explain_res,
+    }
+
+    with st.chat_message("assistant"):
+        with st.spinner("Thinking..."):
+            try:
+                chat_res = requests.post(
+                    f"{API_BASE}/chat",
+                    json={
+                        "message": user_question,
+                        "history": st.session_state.chat_history[:-1],
+                        "context": dashboard_context,
+                    },
+                )
+                chat_res.raise_for_status()
+                reply = chat_res.json()["reply"]
+            except requests.exceptions.HTTPError:
+                detail = chat_res.json().get("detail", "Chat request failed.")
+                reply = f"⚠️ {detail}"
+            except Exception as e:
+                reply = f"⚠️ Could not reach the chat endpoint: {e}"
+        st.write(reply)
+
+    st.session_state.chat_history.append({"role": "assistant", "content": reply})

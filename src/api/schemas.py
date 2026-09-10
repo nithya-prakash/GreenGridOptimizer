@@ -27,3 +27,15 @@ class ExplanationResponse(BaseModel):
     timestamp: datetime
     base_value: float
     feature_contributions: Dict[str, float]
+
+class ChatMessage(BaseModel):
+    role: str  # "user" or "assistant"
+    content: str
+
+class ChatRequest(BaseModel):
+    message: str
+    history: List[ChatMessage] = []
+    context: Dict[str, Any] = {}  # forecast/historical/SHAP data the dashboard currently shows
+
+class ChatResponse(BaseModel):
+    reply: str

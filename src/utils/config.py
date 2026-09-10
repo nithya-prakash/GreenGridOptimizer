@@ -9,6 +9,7 @@ load_dotenv()
 class Config(BaseModel):
     # API Keys
     ENTSOE_API_KEY: str = os.getenv("ENTSOE_API_KEY", "")
+    ANTHROPIC_API_KEY: str = os.getenv("ANTHROPIC_API_KEY", "")
     
     # Region config for Open-Meteo
     REGION_LAT: float = float(os.getenv("REGION_LAT", "52.52"))
