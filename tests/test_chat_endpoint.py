@@ -46,7 +46,7 @@ def test_chat_calls_claude_with_context_and_history(monkeypatch):
 
     assert result.reply == "Wind is low due to a calm weather system."
     call_kwargs = fake_client.messages.create.call_args.kwargs
-    assert call_kwargs["model"] == routes.CHAT_MODEL
+    assert call_kwargs["model"] == settings.CHAT_MODEL
     assert len(call_kwargs["messages"]) == 3  # 2 history entries + the new question
     assert call_kwargs["messages"][-1] == {"role": "user", "content": "Why is wind onshore low tomorrow?"}
     assert "wind_onshore_mw" in call_kwargs["system"][0]["text"]

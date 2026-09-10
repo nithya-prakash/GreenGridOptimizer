@@ -21,8 +21,8 @@ def train_and_evaluate():
         
     df = pd.read_parquet(features_path)
     
-    # Train/Test Split (last 7 days for test, assuming hourly data = 168 rows)
-    test_size = 168
+    # Train/Test Split (last `test_size_hours` for test — see configs/pipeline.yaml)
+    test_size = settings.TEST_SIZE_HOURS
     if len(df) <= test_size:
         log.error("Not enough data for test split.")
         return

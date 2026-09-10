@@ -1,0 +1,20 @@
+# Non-secret pipeline parameters, loaded by src/utils/config.py. API keys and
+# region coordinates stay in .env (secrets / deployment-specific), not here.
+
+evaluation:
+  # Holdout window used by both trainer.py's single train/test split and each
+  # fold of backtest.py's walk-forward backtest. Keeping these in one place
+  # means they can't silently drift apart, which they were doing as two
+  # separate hardcoded `168`s.
+  test_size_hours: 168
+  backtest_folds: 4
+
+forecast:
+  # How much history (hours) to seed the /forecast endpoint's recursive
+  # prediction with. Must comfortably exceed the longest lag/rolling feature
+  # window (168h) so those features aren't computed from a truncated window.
+  history_hours: 504
+  max_hours_ahead: 72
+
+chat:
+  model: claude-opus-5

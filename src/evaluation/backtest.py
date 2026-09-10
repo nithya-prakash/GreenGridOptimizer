@@ -11,10 +11,6 @@ from src.utils.config import settings
 from src.evaluation.metrics import calculate_metrics
 from src.features.feature_engineering import GENERATION_COLUMNS
 
-N_FOLDS = 4
-TEST_SIZE = 168  # 1 week per fold, hourly data
-
-
 def _fold_bounds(n_rows: int, n_folds: int, test_size: int):
     """Expanding-window fold boundaries: each fold's test window is the `test_size`
     hours immediately after the previous fold's, so later folds train on strictly
@@ -26,7 +22,7 @@ def _fold_bounds(n_rows: int, n_folds: int, test_size: int):
         yield train_end, test_end
 
 
-def run_backtest(n_folds: int = N_FOLDS, test_size: int = TEST_SIZE):
+def run_backtest(n_folds: int = settings.BACKTEST_FOLDS, test_size: int = settings.TEST_SIZE_HOURS):
     """
     Walk-forward (rolling-origin) backtest: trains on an expanding window and
     evaluates on the following `test_size`-hour block, repeated across `n_folds`

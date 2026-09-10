@@ -13,13 +13,10 @@ from src.utils.config import settings
 from src.features.feature_engineering import compute_predictor_features, GENERATION_COLUMNS
 from src.ingestion.weather_client import WeatherClient
 
-# How much history to seed the recursive forecast with. Needs to comfortably cover
-# the longest lag/rolling window (168h) so those features aren't computed from a
-# truncated, low-variance window.
-FORECAST_HISTORY_HOURS = 24 * 21
-MAX_FORECAST_HOURS_AHEAD = 72
+# Forecast history/horizon and the chat model are non-secret pipeline parameters —
+# see configs/pipeline.yaml, loaded into settings.FORECAST_HISTORY_HOURS /
+# settings.MAX_FORECAST_HOURS_AHEAD / settings.CHAT_MODEL.
 
-CHAT_MODEL = "claude-opus-5"
 CHAT_SYSTEM_PROMPT = """You are the assistant embedded in the GreenGrid Optimizer dashboard, a \
 renewable energy generation forecasting tool for the German electricity grid (wind onshore, wind \
 offshore, and solar). Answer the user's question using ONLY the dashboard data provided below \
@@ -65,8 +62,8 @@ def get_forecast(region: str = "DE", hours_ahead: int = 24):
     next step, and real Open-Meteo *forecast* weather (not historical) is used for
     the weather features of each future hour.
     """
-    if not 1 <= hours_ahead <= MAX_FORECAST_HOURS_AHEAD:
-        raise HTTPException(status_code=400, detail=f"hours_ahead must be between 1 and {MAX_FORECAST_HOURS_AHEAD}")
+    if not 1 <= hours_ahead <= settings.MAX_FORECAST_HOURS_AHEAD:
+        raise HTTPException(status_code=400, detail=f"hours_ahead must be between 1 and {settings.MAX_FORECAST_HOURS_AHEAD}")
 
     models = get_models()
     missing_models = [t for t in TARGETS if t not in models]
@@ -79,7 +76,7 @@ def get_forecast(region: str = "DE", hours_ahead: int = 24):
 
     df = pd.read_parquet(features_path)
     raw_cols = [c for c in GENERATION_COLUMNS + WeatherClient.HOURLY_VARIABLES + ["is_generation_gap", "has_long_gap"] if c in df.columns]
-    history = df[raw_cols].tail(FORECAST_HISTORY_HOURS).copy()
+    history = df[raw_cols].tail(settings.FORECAST_HISTORY_HOURS).copy()
     history.index = pd.to_datetime(history.index)
     if history.empty:
         raise HTTPException(status_code=503, detail="Not enough historical data to build a forecast")
@@ -258,7 +255,7 @@ def chat(request: ChatRequest):
     client = anthropic.Anthropic(api_key=settings.ANTHROPIC_API_KEY)
     try:
         response = client.messages.create(
-            model=CHAT_MODEL,
+            model=settings.CHAT_MODEL,
             max_tokens=4096,
             system=[{"type": "text", "text": system_prompt, "cache_control": {"type": "ephemeral"}}],
             messages=messages,
