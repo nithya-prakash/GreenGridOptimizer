@@ -1,10 +1,13 @@
+import os
 import streamlit as st
 import requests
 import pandas as pd
 import plotly.express as px
 from datetime import datetime, timedelta
 
-API_BASE = "http://localhost:8000"
+# In docker-compose, the frontend container reaches the API by service name (api:8000),
+# not localhost. Defaults to localhost for running the frontend directly on the host.
+API_BASE = os.environ.get("API_BASE", "http://localhost:8000")
 
 st.set_page_config(page_title="GreenGrid Optimizer", layout="wide")
 

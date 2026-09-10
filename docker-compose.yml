@@ -27,6 +27,7 @@ services:
       - ./mlruns:/app/mlruns
     environment:
       - PYTHONPATH=/app
+      - API_BASE=http://api:8000
 
   mlflow:
     build: .
