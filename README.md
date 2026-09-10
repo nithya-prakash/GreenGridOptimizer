@@ -1,5 +1,7 @@
 # GreenGrid Optimizer
 
+[![CI](https://github.com/nithya-prakash/GreenGridOptimizer/actions/workflows/ci.yml/badge.svg)](https://github.com/nithya-prakash/GreenGridOptimizer/actions/workflows/ci.yml)
+
 An end-to-end ML application that forecasts renewable energy generation (wind onshore, wind offshore, and solar) for Germany. It ingests real public data, trains and compares multiple forecasting approaches per source, explains its predictions with SHAP, serves real recursive multi-step forecasts through a FastAPI backend, and lets you ask questions about the forecast in plain language via an LLM chat feature — all containerized and deployable with `docker-compose up`.
 
 ![GreenGrid Optimizer dashboard — SHAP explainability, per-target model metrics, and the forecast chat feature](docs/dashboard.png)
@@ -34,13 +36,15 @@ Two things this surfaced that a single holdout split would have hidden: wind_ons
 
 ## Folder Structure
 
+- `configs/`: Non-secret pipeline parameters (holdout/backtest window sizes, forecast horizon, chat model) — see `configs/pipeline.yaml`. Secrets and deployment-specific values (API keys, region coordinates) stay in `.env`.
 - `data/`: Raw, processed, and external datasets (git-ignored)
 - `models/`: Trained model artifacts (`production/*.pkl` git-ignored; diagnostic/backtest plots and `backtest_results.json` are tracked)
 - `mlruns/`: MLflow tracking data (git-ignored)
 - `notebooks/`: Jupyter notebooks for EDA and model comparison
 - `src/`: Source code modules (ingestion, preprocessing, features, models, evaluation, explainability, api, utils)
 - `frontend/`: Streamlit dashboard
-- `tests/`: Pytest suite — 17 tests across feature engineering, data validation, the forecast endpoint (including a missing-model-file and a malformed-dtype regression test), the chat endpoint, and backtest fold logic
+- `tests/`: Pytest suite — 25 tests across feature engineering, data validation, the forecast endpoint (including a missing-model-file and a malformed-dtype regression test), the chat endpoint, backtest fold logic, config loading, and the ENTSO-E XML parser
+- `.github/workflows/`: CI — builds the Docker image and runs the test suite on push/PR to main
 
 ## Installation and Docker Instructions
 
@@ -48,7 +52,7 @@ Ensure you have Docker and docker-compose installed.
 
 1. Clone the repository.
 2. Copy `.env.example` to `.env`. Everything below is optional:
-   - `ENTSOE_API_KEY` — the ENTSO-E client is currently stubbed and always defers to the SMARD fallback (see Limitations), so this has no effect yet. Ingestion works out of the box against SMARD, no key needed.
+   - `ENTSOE_API_KEY` — enables real ENTSO-E data (see Limitations: implemented but unverified against a live key). Without it, ingestion falls back to SMARD automatically, no key needed.
    - `ANTHROPIC_API_KEY` — enables the dashboard's chat feature. Without it, `/chat` returns a clear 503 and the rest of the app is unaffected.
 3. Run `docker-compose up --build` to start the API (`:8000`), the Streamlit dashboard (`:8501`), and the MLflow UI (`:5000`).
 4. The API/dashboard need trained models to serve forecasts from. Run the pipeline once first (inside the `api` container or locally with `PYTHONPATH=.`):
@@ -60,7 +64,6 @@ Ensure you have Docker and docker-compose installed.
 
 ## Limitations and Next Steps
 
-- The ENTSO-E client (`src/ingestion/entsoe_client.py`) is a stub that always returns `None` to trigger the SMARD fallback — SMARD is the real data path today, not a fallback-of-last-resort.
-- No CI yet — tests are run manually / in Docker, not on push.
+- The ENTSO-E client (`src/ingestion/entsoe_client.py`) implements the real Transparency Platform API (Actual Generation per Type, XML parsing) per ENTSO-E's public documentation, but no API key was available to test the live call — only the parsing logic is verified (`tests/test_entsoe_client.py`, against a schema-accurate fixture). SMARD remains the verified, real data path; ENTSO-E is attempted first and falls back to SMARD on any failure.
 - No cloud deployment — runs locally via `docker-compose` only.
 - Solar's backtested accuracy degrades over more recent folds (see Model Performance) — worth periodic retraining rather than a train-once model.
