@@ -1,6 +1,6 @@
 # GreenGrid Optimizer
 
-[![CI](https://github.com/nithya-prakash/GreenGridOptimizer/actions/workflows/ci.yml/badge.svg)](https://github.com/nithya-prakash/GreenGridOptimizer/actions/workflows/ci.yml)
+[![CI](https://github.com/nithya-prakash/GreengridOptimizer/actions/workflows/ci.yml/badge.svg)](https://github.com/nithya-prakash/GreengridOptimizer/actions/workflows/ci.yml)
 
 An end-to-end ML application that forecasts renewable energy generation (wind onshore, wind offshore, and solar) for Germany. It ingests real public data, trains and compares multiple forecasting approaches per source, explains its predictions with SHAP, serves real recursive multi-step forecasts through a FastAPI backend, and lets you ask questions about the forecast in plain language via an LLM chat feature — all containerized and deployable with `docker-compose up`.
 
