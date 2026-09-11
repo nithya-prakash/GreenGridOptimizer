@@ -10,6 +10,8 @@ An end-to-end ML application that forecasts renewable energy generation (wind on
 
 Accurate short-horizon (24–72h) forecasts of renewable output are essential for grid balancing. For operators like TenneT, 50Hertz, Amprion, and TransnetBW in Germany, poor forecasts increase redispatch costs, reliance on fossil backup capacity, grid instability, and renewable curtailment. GreenGrid Optimizer addresses this by simulating a grid operator's forecasting system.
 
+**The scale of the problem:** German grid operators spent €2.77 billion on grid congestion management (redispatch + curtailment) in 2024 across 30,304 GWh of measures, including 1,389 GWh of curtailed solar generation alone — up 97% year-over-year ([Bundesnetzagentur data, via Clean Energy Wire](https://www.cleanenergywire.org/news/germanys-needs-and-costs-grid-management-down-2024-network-agency)). Forecast accuracy isn't the only lever on that number, but it's one of the more tractable ones: redispatch and curtailment decisions are made under uncertainty about how much wind/solar will actually generate over the next 24–72h, and tighter forecasts reduce how conservatively operators have to plan around that uncertainty.
+
 ## Architecture
 
 Data Source (SMARD generation + Open-Meteo weather) → Ingestion Pipeline → Feature Engineering → Model Training (Prophet vs. XGBoost, per source) → FastAPI Backend (recursive multi-step forecast, SHAP explainability, LLM chat) → Streamlit Dashboard
