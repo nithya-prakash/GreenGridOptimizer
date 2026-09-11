@@ -4,7 +4,7 @@
 
 An end-to-end ML application that forecasts renewable energy generation (wind onshore, wind offshore, and solar) for Germany. It ingests real public data, trains and compares multiple forecasting approaches per source, explains its predictions with SHAP, serves real recursive multi-step forecasts through a FastAPI backend, and lets you ask questions about the forecast in plain language via an LLM chat feature — all containerized and deployable with `docker-compose up`.
 
-![GreenGrid Optimizer dashboard — SHAP explainability, per-target model metrics, and the forecast chat feature](docs/dashboard.png)
+![GreenGrid Optimizer dashboard — changing the forecast horizon live and watching the recursive forecast recompute for wind onshore, wind offshore, and solar](docs/dashboard.gif)
 
 ## Problem Statement
 
