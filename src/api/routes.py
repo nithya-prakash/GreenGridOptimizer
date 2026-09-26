@@ -1,7 +1,6 @@
-from fastapi import APIRouter, HTTPException
-from typing import List, Dict, Any
-from datetime import datetime, timedelta
-import numpy as np
+from fastapi import APIRouter, HTTPException, Query, Depends
+from typing import List, Dict, Any, Optional
+from datetime import datetime, timedelta, timezone
 import pandas as pd
 import joblib
 import json
@@ -9,19 +8,20 @@ import sqlite3
 import shap
 import anthropic
 from src.api.schemas import ForecastResponse, ModelInfoResponse, ExplanationResponse, ChatRequest, ChatResponse
+from src.api.security import require_api_token, chat_rate_limit
 from src.utils.config import settings
-from src.features.feature_engineering import compute_predictor_features, GENERATION_COLUMNS
+from src.features.feature_engineering import GENERATION_COLUMNS
 from src.ingestion.weather_client import WeatherClient
+from src.models.recursive import recursive_forecast, GAP_FLAG_COLUMNS
 
-# Forecast history/horizon and the chat model are non-secret pipeline parameters —
-# see configs/pipeline.yaml, loaded into settings.FORECAST_HISTORY_HOURS /
-# settings.MAX_FORECAST_HOURS_AHEAD / settings.CHAT_MODEL.
+# Forecast history/horizon, chat model and chat limits are non-secret pipeline
+# parameters — see configs/pipeline.yaml.
 
 CHAT_SYSTEM_PROMPT = """You are the assistant embedded in the GreenGrid Optimizer dashboard, a \
 renewable energy generation forecasting tool for the German electricity grid (wind onshore, wind \
 offshore, and solar). Answer the user's question using ONLY the dashboard data provided below \
 (recent actuals, the current forecast, and SHAP feature contributions explaining one target's \
-latest prediction). Reference specific numbers and timestamps. When asked why generation is high \
+prediction). Reference specific numbers and timestamps. When asked why generation is high \
 or low, ground the explanation in the SHAP contributions. If the data doesn't answer the question, \
 say so rather than guessing. Keep answers to 2-4 sentences.
 
@@ -29,20 +29,49 @@ Dashboard data (JSON):
 {context_json}"""
 
 TARGETS = GENERATION_COLUMNS  # ['wind_onshore', 'wind_offshore', 'solar']
+SUPPORTED_REGIONS = {"DE"}
 
 router = APIRouter()
 
-# In-memory loaded models, keyed by target (lazy load)
+# In-memory model cache: name -> (file mtime, model). Reloaded when the file
+# changes, so models retrained by the refresh job are picked up without a restart.
 _models: Dict[str, Any] = {}
+_cache: Dict[str, tuple] = {}
+
+def _load(name: str) -> Optional[Any]:
+    path = settings.PRODUCTION_MODEL_DIR / f"model_{name}.pkl"
+    if not path.exists():
+        _cache.pop(name, None)
+        return None
+    mtime = path.stat().st_mtime
+    if name not in _cache or _cache[name][0] != mtime:
+        _cache[name] = (mtime, joblib.load(path))
+    return _cache[name][1]
 
 def get_models() -> Dict[str, Any]:
-    """Loads and caches the production model for each modeled target."""
+    """The 1h-ahead production model for each target that has been trained."""
+    _models.clear()
     for target in TARGETS:
-        if target not in _models:
-            model_path = settings.PRODUCTION_MODEL_DIR / f"model_{target}.pkl"
-            if model_path.exists():
-                _models[target] = joblib.load(model_path)
+        model = _load(target)
+        if model is not None:
+            _models[target] = model
     return _models
+
+def get_solar_direct_model() -> Optional[Any]:
+    """The direct multi-horizon solar model (leads 2..72h), if trained."""
+    return _load("solar_direct")
+
+def reset_model_cache():
+    _cache.clear()
+    _models.clear()
+
+
+def _check_region(region: str):
+    # Only Germany-wide data is ingested; accepting other values and silently
+    # returning German numbers would be misleading.
+    if region not in SUPPORTED_REGIONS:
+        raise HTTPException(status_code=400, detail=f"region must be one of: {', '.join(sorted(SUPPORTED_REGIONS))}")
+
 
 @router.get("/")
 def read_root():
@@ -52,103 +81,88 @@ def read_root():
 def healthcheck():
     return {"status": "healthy"}
 
+@router.get("/data/status")
+def data_status():
+    """How current the served data is. Forecasts start from the last published hour."""
+    master_path = settings.PROCESSED_DATA_DIR / "master_dataset.parquet"
+    if not master_path.exists():
+        raise HTTPException(status_code=503, detail="Historical dataset not available")
+    last_ts = pd.read_parquet(master_path, columns=["wind_onshore"]).index.max()
+    age_hours = (pd.Timestamp.now(tz="UTC") - last_ts).total_seconds() / 3600
+    return {
+        "last_data_timestamp": last_ts.isoformat(),
+        "age_hours": round(age_hours, 1),
+        "stale": age_hours > settings.STALE_AFTER_HOURS,
+        "stale_after_hours": settings.STALE_AFTER_HOURS,
+    }
+
 @router.get("/forecast", response_model=List[ForecastResponse])
 def get_forecast(region: str = "DE", hours_ahead: int = 24):
     """
-    Recursive multi-step forecast: each model predicts its target at t+1 from
-    features known at t (current weather + lags/rolling stats of wind_onshore,
-    wind_offshore, solar and weather). To forecast further than 1h out, each step's
-    three predictions are fed back in as the "current" generation values for the
-    next step, and real Open-Meteo *forecast* weather (not historical) is used for
-    the weather features of each future hour.
+    Multi-step forecast from the last hour in the dataset (see
+    src/models/recursive.py — the same function the backtest evaluates): wind is
+    recursive, solar beyond 1h comes from the direct multi-horizon model. Uses
+    live Open-Meteo *forecast* weather for every future hour.
     """
+    _check_region(region)
     if not 1 <= hours_ahead <= settings.MAX_FORECAST_HOURS_AHEAD:
         raise HTTPException(status_code=400, detail=f"hours_ahead must be between 1 and {settings.MAX_FORECAST_HOURS_AHEAD}")
 
     models = get_models()
     missing_models = [t for t in TARGETS if t not in models]
+    solar_direct = get_solar_direct_model()
+    if solar_direct is None:
+        missing_models.append("solar_direct")
     if missing_models:
         raise HTTPException(status_code=503, detail=f"Model(s) not loaded for: {', '.join(missing_models)}")
 
-    features_path = settings.PROCESSED_DATA_DIR / "features.parquet"
-    if not features_path.exists():
-        raise HTTPException(status_code=503, detail="Feature dataset not available")
+    master_path = settings.PROCESSED_DATA_DIR / "master_dataset.parquet"
+    if not master_path.exists():
+        raise HTTPException(status_code=503, detail="Historical dataset not available")
 
-    df = pd.read_parquet(features_path)
-    raw_cols = [c for c in GENERATION_COLUMNS + WeatherClient.HOURLY_VARIABLES + ["is_generation_gap", "has_long_gap"] if c in df.columns]
-    history = df[raw_cols].tail(settings.FORECAST_HISTORY_HOURS).copy()
+    df = pd.read_parquet(master_path)
+    raw_cols = [c for c in GENERATION_COLUMNS + WeatherClient.WEATHER_COLUMNS + GAP_FLAG_COLUMNS if c in df.columns]
+    history = df[raw_cols].dropna(subset=GENERATION_COLUMNS).tail(settings.FORECAST_HISTORY_HOURS).copy()
     history.index = pd.to_datetime(history.index)
     if history.empty:
         raise HTTPException(status_code=503, detail="Not enough historical data to build a forecast")
 
     last_known_ts = history.index.max()
 
-    # Weather forecast is only needed for the *intermediate* future hours (t+1 .. t+hours_ahead-1),
-    # since those feed the feature row used to predict the next step. The final step's own weather
-    # isn't needed because there's no step after it.
-    weather_future = None
-    if hours_ahead > 1:
-        forecast_start = last_known_ts + timedelta(hours=1)
-        forecast_end = last_known_ts + timedelta(hours=hours_ahead - 1)
-        weather_client = WeatherClient()
-        weather_future = weather_client.fetch_forecast(forecast_start.date(), forecast_end.date())
-        if weather_future is None or weather_future.empty:
-            raise HTTPException(status_code=503, detail="Could not fetch weather forecast from Open-Meteo")
+    # Every step needs the forecast weather for the hour it predicts (the *_next_1h features).
+    forecast_start = last_known_ts + timedelta(hours=1)
+    forecast_end = last_known_ts + timedelta(hours=hours_ahead)
+    weather_future = WeatherClient().fetch_forecast(forecast_start.date(), forecast_end.date())
+    if weather_future is None or weather_future.empty:
+        raise HTTPException(status_code=503, detail="Could not fetch weather forecast from Open-Meteo")
 
-        expected_hours = pd.date_range(forecast_start, forecast_end, freq="h", tz="UTC")
-        missing = expected_hours.difference(weather_future.index)
-        if len(missing) > 0:
-            raise HTTPException(
-                status_code=503,
-                detail=f"Weather forecast does not cover the requested window ({len(missing)} hour(s) missing). "
-                       "Historical data may be stale — re-run the ingestion pipeline."
-            )
+    expected_hours = pd.date_range(forecast_start, forecast_end, freq="h", tz="UTC")
+    missing = expected_hours.difference(weather_future.dropna().index)
+    if len(missing) > 0:
+        raise HTTPException(
+            status_code=503,
+            detail=f"Weather forecast does not cover the requested window ({len(missing)} hour(s) missing). "
+                   "Historical data may be stale — re-run the ingestion pipeline."
+        )
 
-    expected_feature_cols = {t: getattr(m, "feature_names_in_", None) for t, m in models.items()}
-    results = []
-    current_ts = last_known_ts
-
-    for step in range(hours_ahead):
-        featured = compute_predictor_features(history)
-        X = featured.iloc[[-1]].drop(columns=[c for c in featured.columns if c.startswith('target_')], errors='ignore')
-
-        preds = {}
-        for target in TARGETS:
-            X_target = X
-            if expected_feature_cols[target] is not None:
-                X_target = X.reindex(columns=list(expected_feature_cols[target]))
-            preds[target] = float(models[target].predict(X_target)[0])
-
-        predict_ts = current_ts + timedelta(hours=1)
-        results.append(ForecastResponse(
-            timestamp=predict_ts,
-            wind_onshore_mw=preds['wind_onshore'],
-            wind_offshore_mw=preds['wind_offshore'],
-            solar_mw=preds['solar']
-        ))
-
-        if step < hours_ahead - 1:
-            # Built as a dict -> single-row DataFrame (not a uniformly-typed Series) so pandas
-            # infers a dtype per column. is_generation_gap/has_long_gap are genuinely bool in
-            # the historical data; concatenating a float64-cast copy of them onto history would
-            # silently upcast the column to `object`, which XGBoost's predict() then rejects.
-            new_row_data = {col: float(weather_future.loc[predict_ts, col]) for col in WeatherClient.HOURLY_VARIABLES}
-            new_row_data.update({target: float(preds[target]) for target in TARGETS})
-            if 'is_generation_gap' in history.columns:
-                new_row_data['is_generation_gap'] = False
-            if 'has_long_gap' in history.columns:
-                new_row_data['has_long_gap'] = False
-            new_row_df = pd.DataFrame([new_row_data], index=[predict_ts])[history.columns]
-
-            history = pd.concat([history, new_row_df])
-            history.index = pd.to_datetime(history.index)
-            current_ts = predict_ts
-
-    return results
+    forecast = recursive_forecast(models, history, weather_future, hours_ahead, solar_direct_model=solar_direct)
+    return [
+        ForecastResponse(
+            timestamp=ts,
+            wind_onshore_mw=row["wind_onshore"],
+            wind_offshore_mw=row["wind_offshore"],
+            solar_mw=row["solar"],
+        )
+        for ts, row in forecast.iterrows()
+    ]
 
 @router.get("/forecast/explain", response_model=ExplanationResponse)
-def explain_forecast(target: str = "wind_onshore", timestamp: str = None):
-    # For demo, explain the very last prediction we can make
+def explain_forecast(target: str = "wind_onshore", timestamp: Optional[str] = None):
+    """
+    SHAP contributions for one 1h-ahead prediction from the feature dataset: the
+    row at `timestamp` (ISO-8601, UTC), or the most recent row if omitted. The
+    response says which row was explained and which hour it predicts.
+    """
     if target not in TARGETS:
         raise HTTPException(status_code=400, detail=f"target must be one of: {', '.join(TARGETS)}")
 
@@ -159,35 +173,50 @@ def explain_forecast(target: str = "wind_onshore", timestamp: str = None):
         raise HTTPException(status_code=503, detail="Model or data not available")
 
     df = pd.read_parquet(features_path)
-    latest_row = df.tail(1)
-    drop_cols = [c for c in latest_row.columns if c.startswith('target_')]
-    X = latest_row.drop(columns=drop_cols)
-    
-    # Calculate SHAP for this row
+    if timestamp is None:
+        row = df.tail(1)
+    else:
+        try:
+            ts = pd.Timestamp(timestamp)
+            ts = ts.tz_localize("UTC") if ts.tzinfo is None else ts.tz_convert("UTC")
+        except (ValueError, TypeError):
+            raise HTTPException(status_code=400, detail="timestamp must be an ISO-8601 datetime")
+        if ts not in df.index:
+            raise HTTPException(
+                status_code=404,
+                detail=f"No feature row at {ts}. Available range: {df.index.min()} to {df.index.max()} (hourly)."
+            )
+        row = df.loc[[ts]]
+
+    X = row.drop(columns=[c for c in row.columns if c.startswith('target_')])
+    expected = getattr(model, "feature_names_in_", None)
+    if expected is not None:
+        X = X.reindex(columns=list(expected))
+
     try:
         explainer = shap.TreeExplainer(model)
         shap_values = explainer(X)
     except Exception:
-        # Fallback for HistGradientBoosting
-        background = shap.sample(X, 10)
-        explainer = shap.Explainer(model.predict, background)
+        # Model-agnostic fallback for non-tree models.
+        explainer = shap.Explainer(model.predict, X)
         shap_values = explainer(X)
-        
+
     contributions = dict(zip(X.columns, shap_values.values[0]))
-    base_val = float(shap_values.base_values[0])
-    
-    # Take top 10 features
     top_10 = sorted(contributions.items(), key=lambda x: abs(x[1]), reverse=True)[:10]
-    
+    row_ts = pd.Timestamp(X.index[0])
+
     return ExplanationResponse(
         target=target,
-        timestamp=datetime.now(),
-        base_value=base_val,
-        feature_contributions=dict(top_10)
+        timestamp=row_ts,
+        prediction_for=row_ts + timedelta(hours=1),
+        predicted_mw=float(model.predict(X)[0]),
+        base_value=float(shap_values.base_values[0]),
+        feature_contributions={k: float(v) for k, v in top_10},
     )
 
 @router.get("/historical")
-def get_historical(region: str = "DE", limit: int = 168):
+def get_historical(region: str = "DE", limit: int = Query(168, ge=1, le=24 * 365)):
+    _check_region(region)
     features_path = settings.PROCESSED_DATA_DIR / "master_dataset.parquet"
     if not features_path.exists():
         raise HTTPException(status_code=503, detail="Historical data not available")
@@ -198,26 +227,39 @@ def get_historical(region: str = "DE", limit: int = 168):
 
 @router.get("/metrics")
 def get_metrics():
+    """Single-holdout (last week) 1h-ahead metrics logged by trainer.py to MLflow."""
     db_path = settings.MLRUNS_DIR / "mlflow.db"
     if not db_path.exists():
         raise HTTPException(status_code=404, detail="Metrics DB not found")
-        
+
     conn = sqlite3.connect(str(db_path))
     query = """
-    SELECT runs.name, m.key, m.value 
-    FROM runs 
+    SELECT runs.name, m.key, m.value
+    FROM runs
     JOIN metrics m ON runs.run_uuid = m.run_uuid
     WHERE runs.status = 'FINISHED'
+    ORDER BY runs.start_time
     """
-    df = pd.read_sql(query, conn)
-    conn.close()
-    
-    # Format nicely
+    try:
+        df = pd.read_sql(query, conn)
+    finally:
+        conn.close()
+
+    # Later runs with the same name overwrite earlier ones, so each name shows its latest run.
     result = {}
     for run in df['name'].unique():
         run_data = df[df['name'] == run]
         result[run] = dict(zip(run_data['key'], run_data['value']))
     return result
+
+@router.get("/backtest")
+def get_backtest():
+    """Walk-forward backtest summary (1h-ahead and recursive error by horizon)."""
+    path = settings.MODELS_DIR / "backtest_results.json"
+    if not path.exists():
+        raise HTTPException(status_code=404, detail="Backtest results not found. Run src/evaluation/backtest.py.")
+    with open(path) as f:
+        return json.load(f)
 
 @router.get("/model/info", response_model=ModelInfoResponse)
 def get_model_info():
@@ -225,19 +267,34 @@ def get_model_info():
     if not models:
         raise HTTPException(status_code=503, detail="No models loaded")
 
-    features_path = settings.PROCESSED_DATA_DIR / "features.parquet"
-    features_used = []
-    if features_path.exists():
-        df = pd.read_parquet(features_path)
-        features_used = [c for c in df.columns if not c.startswith('target_')]
+    metadata_path = settings.PRODUCTION_MODEL_DIR / "metadata.json"
+    if metadata_path.exists():
+        with open(metadata_path) as f:
+            training_date = json.load(f).get("trained_at")
+        source = "metadata"
+    else:
+        # Older artifacts without metadata: the model file's mtime is when it was saved.
+        mtimes = [(settings.PRODUCTION_MODEL_DIR / f"model_{t}.pkl").stat().st_mtime for t in models]
+        training_date = datetime.fromtimestamp(max(mtimes), tz=timezone.utc).isoformat()
+        source = "model_file_mtime"
+
+    first_model = next(iter(models.values()))
+    features = list(getattr(first_model, "feature_names_in_", []))
+
+    model_types = {target: type(model).__name__ for target, model in models.items()}
+    solar_direct = get_solar_direct_model()
+    if solar_direct is not None:
+        model_types["solar_direct"] = f"{type(solar_direct).__name__} (leads 2-{settings.MAX_FORECAST_HOURS_AHEAD}h)"
 
     return ModelInfoResponse(
-        models={target: type(model).__name__ for target, model in models.items()},
-        training_date=str(datetime.now().date()), # Ideally fetched from mlflow
-        features_used=features_used[:20] # Return first 20 just for brevity
+        models=model_types,
+        training_date=training_date,
+        training_date_source=source,
+        n_features=len(features),
+        features_used=features[:20],
     )
 
-@router.post("/chat", response_model=ChatResponse)
+@router.post("/chat", response_model=ChatResponse, dependencies=[Depends(require_api_token), Depends(chat_rate_limit)])
 def chat(request: ChatRequest):
     """
     Answers questions about the forecast currently shown on the dashboard. The caller
@@ -247,17 +304,26 @@ def chat(request: ChatRequest):
     if not settings.ANTHROPIC_API_KEY:
         raise HTTPException(status_code=503, detail="Chat is not configured: ANTHROPIC_API_KEY is not set.")
 
-    context_json = json.dumps(request.context, indent=2, default=str)[:12000]
+    # Compact, deterministic serialization. Oversized context is rejected rather than
+    # cut mid-JSON, which would hand the model malformed/partial data.
+    context_json = json.dumps(request.context, separators=(",", ":"), sort_keys=True, default=str)
+    if len(context_json) > settings.CHAT_MAX_CONTEXT_CHARS:
+        raise HTTPException(
+            status_code=413,
+            detail=f"Chat context is {len(context_json)} characters; the limit is {settings.CHAT_MAX_CONTEXT_CHARS}."
+        )
     system_prompt = CHAT_SYSTEM_PROMPT.format(context_json=context_json)
     messages = [{"role": m.role, "content": m.content} for m in request.history]
     messages.append({"role": "user", "content": request.message})
 
     client = anthropic.Anthropic(api_key=settings.ANTHROPIC_API_KEY)
     try:
+        # No prompt caching: the system prompt embeds per-request dashboard data, so a
+        # cached prefix would never be reused.
         response = client.messages.create(
             model=settings.CHAT_MODEL,
             max_tokens=4096,
-            system=[{"type": "text", "text": system_prompt, "cache_control": {"type": "ephemeral"}}],
+            system=system_prompt,
             messages=messages,
         )
     except anthropic.AuthenticationError:
@@ -269,5 +335,7 @@ def chat(request: ChatRequest):
     except anthropic.APIStatusError as e:
         raise HTTPException(status_code=502, detail=f"Claude API error: {e.message}")
 
+    if response.stop_reason == "refusal":
+        return ChatResponse(reply="The model declined to answer this question.")
     reply = next((block.text for block in response.content if block.type == "text"), "")
     return ChatResponse(reply=reply)

@@ -56,3 +56,14 @@ def test_shipped_pipeline_yaml_matches_running_settings():
     assert settings.FORECAST_HISTORY_HOURS == 504
     assert settings.MAX_FORECAST_HOURS_AHEAD == 72
     assert settings.CHAT_MODEL == "claude-opus-5"
+
+
+def test_shipped_pipeline_yaml_defines_multi_site_weather():
+    assert len(settings.WEATHER_LAND_SITES) > 1
+    assert len(settings.WEATHER_OFFSHORE_SITES) >= 1
+    assert all({"lat", "lon"} <= set(site) for site in settings.WEATHER_LAND_SITES + settings.WEATHER_OFFSHORE_SITES)
+
+
+def test_shipped_pipeline_yaml_defines_refresh_schedule():
+    assert settings.REFRESH_INTERVAL_HOURS > 0
+    assert settings.STALE_AFTER_HOURS > settings.REFRESH_INTERVAL_HOURS

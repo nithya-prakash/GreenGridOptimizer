@@ -2,6 +2,7 @@ import os
 from pathlib import Path
 import yaml
 from dotenv import load_dotenv
+from typing import List, Dict, Any
 from pydantic import BaseModel
 
 # Load environment variables
@@ -12,9 +13,12 @@ class Config(BaseModel):
     ENTSOE_API_KEY: str = os.getenv("ENTSOE_API_KEY", "")
     ANTHROPIC_API_KEY: str = os.getenv("ANTHROPIC_API_KEY", "")
 
-    # Region config for Open-Meteo
-    REGION_LAT: float = float(os.getenv("REGION_LAT", "52.52"))
-    REGION_LON: float = float(os.getenv("REGION_LON", "13.40"))
+    # Optional shared secret for the credit-spending /chat endpoint (sent as the
+    # X-API-Key header). Unset = no auth, which is only appropriate on localhost.
+    API_AUTH_TOKEN: str = os.getenv("API_AUTH_TOKEN", "")
+    # Comma-separated origins allowed by CORS. The Streamlit frontend calls the API
+    # server-side, so browsers never need cross-origin access by default.
+    CORS_ORIGINS: List[str] = [o.strip() for o in os.getenv("CORS_ORIGINS", "http://localhost:8501").split(",") if o.strip()]
 
     # Paths
     BASE_DIR: Path = Path(__file__).parent.parent.parent
@@ -30,9 +34,19 @@ class Config(BaseModel):
     # configs/pipeline.yaml when present. See that file for what each means.
     TEST_SIZE_HOURS: int = 168
     BACKTEST_FOLDS: int = 4
+    BACKTEST_ORIGIN_STEP_HOURS: int = 7
     FORECAST_HISTORY_HOURS: int = 504
     MAX_FORECAST_HOURS_AHEAD: int = 72
     CHAT_MODEL: str = "claude-opus-5"
+    CHAT_RATE_LIMIT_PER_MINUTE: int = 10
+    REFRESH_INTERVAL_HOURS: float = 6
+    RETRAIN_AFTER_DAYS: float = 7
+    STALE_AFTER_HOURS: float = 36
+    REFRESH_HISTORY_DAYS: int = 120
+    CHAT_MAX_CONTEXT_CHARS: int = 40000
+    # Default weather sites if pipeline.yaml has none (a single central point).
+    WEATHER_LAND_SITES: List[Dict[str, Any]] = [{"name": "central_de", "lat": 51.2, "lon": 10.4, "weight": 1.0}]
+    WEATHER_OFFSHORE_SITES: List[Dict[str, Any]] = [{"name": "north_sea", "lat": 54.3, "lon": 6.5, "weight": 1.0}]
 
     def __init__(self, **data):
         super().__init__(**data)
@@ -52,10 +66,21 @@ class Config(BaseModel):
         evaluation = data.get("evaluation", {})
         forecast = data.get("forecast", {})
         chat = data.get("chat", {})
+        weather = data.get("weather", {})
+        refresh = data.get("refresh", {})
         self.TEST_SIZE_HOURS = evaluation.get("test_size_hours", self.TEST_SIZE_HOURS)
         self.BACKTEST_FOLDS = evaluation.get("backtest_folds", self.BACKTEST_FOLDS)
+        self.BACKTEST_ORIGIN_STEP_HOURS = evaluation.get("backtest_origin_step_hours", self.BACKTEST_ORIGIN_STEP_HOURS)
         self.FORECAST_HISTORY_HOURS = forecast.get("history_hours", self.FORECAST_HISTORY_HOURS)
         self.MAX_FORECAST_HOURS_AHEAD = forecast.get("max_hours_ahead", self.MAX_FORECAST_HOURS_AHEAD)
         self.CHAT_MODEL = chat.get("model", self.CHAT_MODEL)
+        self.CHAT_RATE_LIMIT_PER_MINUTE = chat.get("rate_limit_per_minute", self.CHAT_RATE_LIMIT_PER_MINUTE)
+        self.CHAT_MAX_CONTEXT_CHARS = chat.get("max_context_chars", self.CHAT_MAX_CONTEXT_CHARS)
+        self.REFRESH_INTERVAL_HOURS = refresh.get("interval_hours", self.REFRESH_INTERVAL_HOURS)
+        self.RETRAIN_AFTER_DAYS = refresh.get("retrain_after_days", self.RETRAIN_AFTER_DAYS)
+        self.STALE_AFTER_HOURS = refresh.get("stale_after_hours", self.STALE_AFTER_HOURS)
+        self.REFRESH_HISTORY_DAYS = refresh.get("history_days", self.REFRESH_HISTORY_DAYS)
+        self.WEATHER_LAND_SITES = weather.get("land_sites", self.WEATHER_LAND_SITES)
+        self.WEATHER_OFFSHORE_SITES = weather.get("offshore_sites", self.WEATHER_OFFSHORE_SITES)
 
 settings = Config()

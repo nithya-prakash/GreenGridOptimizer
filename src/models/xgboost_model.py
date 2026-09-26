@@ -1,44 +1,29 @@
 import pandas as pd
 from src.utils.logger import log
 
-try:
-    from xgboost import XGBRegressor
-    HAS_XGB = True
-except Exception as e:
-    log.warning(f"Failed to import xgboost (likely missing libomp on Mac). Falling back to HistGradientBoostingRegressor: {e}")
-    from sklearn.ensemble import HistGradientBoostingRegressor as XGBRegressor
-    HAS_XGB = False
-
+# No silent fallback: a missing libomp on macOS used to swap in sklearn's
+# HistGradientBoostingRegressor while every log/metric still said "XGBoost".
+# Fail loudly instead (`brew install libomp`, or run in Docker).
+from xgboost import XGBRegressor
 from sklearn.model_selection import TimeSeriesSplit, RandomizedSearchCV
 
 class XGBoostForecaster:
     def __init__(self):
         self.model = None
         self.best_params = None
-        self.has_xgb = HAS_XGB
         
     def fit(self, X_train: pd.DataFrame, y_train: pd.Series):
-        log.info(f"Training XGBoost model (using actual xgboost: {self.has_xgb})...")
+        log.info("Training XGBoost model...")
         
-        # Define hyperparameter search space
-        if self.has_xgb:
-            param_dist = {
-                'n_estimators': [100, 200, 300],
-                'max_depth': [3, 5, 7],
-                'learning_rate': [0.01, 0.05, 0.1],
-                'subsample': [0.8, 1.0],
-                'colsample_bytree': [0.8, 1.0]
-            }
-            xgb = XGBRegressor(random_state=42, objective='reg:squarederror')
-        else:
-            param_dist = {
-                'max_iter': [100, 200, 300],
-                'max_depth': [3, 5, 7],
-                'learning_rate': [0.01, 0.05, 0.1],
-                'max_features': [0.8, 1.0]
-            }
-            xgb = XGBRegressor(random_state=42)
-        
+        param_dist = {
+            'n_estimators': [100, 200, 300],
+            'max_depth': [3, 5, 7],
+            'learning_rate': [0.01, 0.05, 0.1],
+            'subsample': [0.8, 1.0],
+            'colsample_bytree': [0.8, 1.0]
+        }
+        xgb = XGBRegressor(random_state=42, objective='reg:squarederror')
+
         # TimeSeriesSplit for CV
         # Using 3 splits to save time during RandomizedSearchCV
         tscv = TimeSeriesSplit(n_splits=3)

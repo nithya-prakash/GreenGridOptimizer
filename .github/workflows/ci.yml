@@ -7,13 +7,51 @@ on:
     branches: [main]
 
 jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install ruff
+      - run: ruff check .
+
   test:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
-      - name: Build Docker image
-        run: docker build -t greengrid-optimizer:ci .
+      - name: Build Docker image (with dev dependencies)
+        run: docker build --build-arg INSTALL_DEV=true -t greengrid-optimizer:ci .
 
       - name: Run test suite
         run: docker run --rm greengrid-optimizer:ci python -m pytest tests/ -v
+
+      - name: Check secrets and data are not baked into the image
+        run: |
+          docker run --rm greengrid-optimizer:ci sh -c 'test ! -e /app/.env && test ! -e /app/data && test ! -e /app/.git'
+
+  compose-smoke:
+    # Proves the documented `docker compose up` path starts on a fresh clone with
+    # no .env file and no trained models (API healthy, dashboard serving).
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Start stack
+        run: docker compose up -d --build api frontend
+      - name: Wait for API and dashboard
+        run: |
+          for i in $(seq 1 60); do
+            if curl -sf http://localhost:8000/health && curl -sf http://localhost:8501/_stcore/health; then exit 0; fi
+            sleep 5
+          done
+          docker compose logs
+          exit 1
+      - name: Model-dependent endpoints fail cleanly without trained models
+        run: |
+          test "$(curl -s -o /dev/null -w '%{http_code}' http://localhost:8000/model/info)" = "503"
+          test "$(curl -s -o /dev/null -w '%{http_code}' 'http://localhost:8000/historical?limit=0')" = "422"
+      - name: Tear down
+        if: always()
+        run: docker compose down

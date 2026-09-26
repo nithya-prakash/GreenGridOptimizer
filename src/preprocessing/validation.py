@@ -13,7 +13,8 @@ def validate_master_dataset(df: pd.DataFrame) -> bool:
         'wind_speed_10m', 'wind_speed_100m', 'wind_direction_10m',
         'wind_direction_100m', 'temperature_2m', 'cloud_cover',
         'shortwave_radiation', 'direct_radiation', 'diffuse_radiation',
-        'precipitation', 'is_generation_gap', 'has_long_gap'
+        'precipitation', 'offshore_wind_speed_10m', 'offshore_wind_speed_100m',
+        'offshore_wind_direction_100m', 'is_generation_gap', 'has_long_gap'
     ]
     
     # Check columns
@@ -34,6 +35,18 @@ def validate_master_dataset(df: pd.DataFrame) -> bool:
         if (df[col] < -100).any(): # allowing small negative values
             log.warning(f"Found significant negative generation values in {col}.")
             
+    # Physical sanity check: solar must be ~0 at night. Schema checks alone passed for
+    # months while the data source mapped PV into "wind_onshore" and pumped storage
+    # into "solar". Only applied with at least a few days of data to compare.
+    if len(df) >= 72:
+        hours = df.index.hour
+        night = df.loc[(hours >= 0) & (hours <= 2), 'solar'].mean()
+        midday = df.loc[(hours >= 10) & (hours <= 13), 'solar'].mean()
+        if midday <= 0 or night > 0.05 * midday:
+            log.error(f"Validation failed: 'solar' is not ~0 at night (00-02h UTC mean {night:.0f} MW vs "
+                      f"10-13h mean {midday:.0f} MW). Check the source's column mapping.")
+            return False
+
     # Check for too many missing values
     missing_pct = df.isna().mean() * 100
     for col, pct in missing_pct.items():

@@ -1,0 +1,24 @@
+# Secrets must never be baked into an image (compose injects .env at runtime).
+.env
+.env.*
+!.env.example
+
+# Data and artifacts are mounted as volumes at runtime, not copied in.
+data/
+mlruns/
+models/production/*.pkl
+models/production/metadata.json
+
+# VCS, caches, local environments, docs media
+.git/
+.github/
+**/__pycache__/
+**/*.py[cod]
+.pytest_cache/
+.ruff_cache/
+.venv/
+venv/
+.ipynb_checkpoints/
+.DS_Store
+docs/
+notebooks/

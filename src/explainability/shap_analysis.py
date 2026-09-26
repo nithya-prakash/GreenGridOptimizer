@@ -3,7 +3,6 @@ import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
 import joblib
-from pathlib import Path
 from src.utils.logger import log
 from src.utils.config import settings
 from src.features.feature_engineering import GENERATION_COLUMNS
@@ -43,9 +42,8 @@ def run_shap_analysis(target: str):
     drop_cols = [c for c in df.columns if c.startswith('target_')]
     X_test = test_df.drop(columns=drop_cols)
     
-    # Depending on whether the model is HistGradientBoosting or actual XGBoost
-    # TreeExplainer is best, but if we fell back to HistGradientBoosting, we might need ExactExplainer
-    # Let's try TreeExplainer first
+    # TreeExplainer is exact and fast for XGBoost; the model-agnostic Explainer
+    # is only a fallback for non-tree models.
     try:
         explainer = shap.TreeExplainer(model)
         shap_values = explainer(X_test)

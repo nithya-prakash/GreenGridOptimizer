@@ -1,5 +1,5 @@
 # Non-secret pipeline parameters, loaded by src/utils/config.py. API keys and
-# region coordinates stay in .env (secrets / deployment-specific), not here.
+# deployment-specific values (auth token, CORS origins) stay in .env, not here.
 
 evaluation:
   # Holdout window used by both trainer.py's single train/test split and each
@@ -8,6 +8,13 @@ evaluation:
   # separate hardcoded `168`s.
   test_size_hours: 168
   backtest_folds: 4
+  # backtest.py also runs the *recursive* multi-step forecast (what /forecast
+  # actually serves) from an origin every `backtest_origin_step_hours` inside
+  # each fold's test window, out to max_hours_ahead, and reports error by horizon.
+  # 7 is coprime with 24, so a 168h test week gets one origin at every hour of
+  # the day (a 24h step would start every run at the same hour, e.g. always at
+  # night, which badly skews short-lead error for solar).
+  backtest_origin_step_hours: 7
 
 forecast:
   # How much history (hours) to seed the /forecast endpoint's recursive
@@ -16,5 +23,38 @@ forecast:
   history_hours: 504
   max_hours_ahead: 72
 
+weather:
+  # Germany-wide generation can't be explained by one weather point. The base
+  # weather columns are a weighted average over these land sites (spread across
+  # the main onshore-wind regions in the north and the main solar regions in the
+  # south), and the offshore_* columns come from the offshore wind-farm areas,
+  # weighted roughly by installed capacity (North Sea ~8 GW, Baltic ~1.6 GW).
+  # Weights are a deliberate simplification, not capacity-accurate per site.
+  land_sites:
+    - {name: schleswig_holstein, lat: 54.3, lon: 9.7, weight: 1.0}
+    - {name: lower_saxony, lat: 52.8, lon: 8.5, weight: 1.0}
+    - {name: brandenburg, lat: 52.4, lon: 13.4, weight: 1.0}
+    - {name: north_rhine_westphalia, lat: 51.5, lon: 7.5, weight: 1.0}
+    - {name: bavaria, lat: 48.8, lon: 11.5, weight: 1.0}
+    - {name: baden_wuerttemberg, lat: 48.5, lon: 9.0, weight: 1.0}
+  offshore_sites:
+    - {name: north_sea_german_bight, lat: 54.3, lon: 6.5, weight: 0.83}
+    - {name: baltic_sea, lat: 54.7, lon: 13.8, weight: 0.17}
+
+refresh:
+  # The `updater` compose service re-ingests data this often, so forecasts start
+  # from recent actuals instead of whenever the pipeline was last run by hand.
+  interval_hours: 6
+  # ...and retrains the models once they are this old.
+  retrain_after_days: 7
+  # The API/dashboard flag the data as stale beyond this age.
+  stale_after_hours: 36
+  history_days: 120
+
 chat:
   model: claude-opus-5
+  # Per-client-IP limit on /chat, which spends Anthropic credits per call.
+  rate_limit_per_minute: 10
+  # Upper bound on the serialized dashboard context sent with a chat message.
+  # Oversized contexts are rejected (413), never silently truncated.
+  max_context_chars: 40000

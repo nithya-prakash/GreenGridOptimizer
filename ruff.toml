@@ -1,0 +1,7 @@
+target-version = "py312"
+line-length = 140
+extend-exclude = ["notebooks"]
+
+[lint]
+select = ["E", "F"]
+ignore = ["E501", "E402"]

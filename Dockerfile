@@ -8,10 +8,14 @@ RUN apt-get update && apt-get install -y \
     libomp-dev \
     && rm -rf /var/lib/apt/lists/*
 
-COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+# Runtime dependencies only by default; CI builds with INSTALL_DEV=true to get
+# pytest/ruff (see requirements-dev.txt).
+ARG INSTALL_DEV=false
+COPY requirements.txt requirements-dev.txt ./
+RUN pip install --no-cache-dir -r requirements.txt \
+    && if [ "$INSTALL_DEV" = "true" ]; then pip install --no-cache-dir -r requirements-dev.txt; fi
 
-# Copy the whole project
+# Copy the project (.dockerignore keeps .env, data/, mlruns/ and .git out of the image)
 COPY . .
 
 # Set PYTHONPATH so absolute imports work
