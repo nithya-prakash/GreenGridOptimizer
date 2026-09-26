@@ -39,6 +39,9 @@ class Config(BaseModel):
     MAX_FORECAST_HOURS_AHEAD: int = 72
     CHAT_MODEL: str = "claude-opus-5"
     CHAT_RATE_LIMIT_PER_MINUTE: int = 10
+    READ_RATE_LIMIT_PER_MINUTE: int = 120
+    FORECAST_RATE_LIMIT_PER_MINUTE: int = 20
+    FORECAST_CACHE_MINUTES: float = 30
     REFRESH_INTERVAL_HOURS: float = 6
     RETRAIN_AFTER_DAYS: float = 7
     STALE_AFTER_HOURS: float = 36
@@ -68,6 +71,7 @@ class Config(BaseModel):
         chat = data.get("chat", {})
         weather = data.get("weather", {})
         refresh = data.get("refresh", {})
+        api = data.get("api", {})
         self.TEST_SIZE_HOURS = evaluation.get("test_size_hours", self.TEST_SIZE_HOURS)
         self.BACKTEST_FOLDS = evaluation.get("backtest_folds", self.BACKTEST_FOLDS)
         self.BACKTEST_ORIGIN_STEP_HOURS = evaluation.get("backtest_origin_step_hours", self.BACKTEST_ORIGIN_STEP_HOURS)
@@ -76,6 +80,9 @@ class Config(BaseModel):
         self.CHAT_MODEL = chat.get("model", self.CHAT_MODEL)
         self.CHAT_RATE_LIMIT_PER_MINUTE = chat.get("rate_limit_per_minute", self.CHAT_RATE_LIMIT_PER_MINUTE)
         self.CHAT_MAX_CONTEXT_CHARS = chat.get("max_context_chars", self.CHAT_MAX_CONTEXT_CHARS)
+        self.READ_RATE_LIMIT_PER_MINUTE = api.get("read_rate_limit_per_minute", self.READ_RATE_LIMIT_PER_MINUTE)
+        self.FORECAST_RATE_LIMIT_PER_MINUTE = api.get("forecast_rate_limit_per_minute", self.FORECAST_RATE_LIMIT_PER_MINUTE)
+        self.FORECAST_CACHE_MINUTES = api.get("forecast_cache_minutes", self.FORECAST_CACHE_MINUTES)
         self.REFRESH_INTERVAL_HOURS = refresh.get("interval_hours", self.REFRESH_INTERVAL_HOURS)
         self.RETRAIN_AFTER_DAYS = refresh.get("retrain_after_days", self.RETRAIN_AFTER_DAYS)
         self.STALE_AFTER_HOURS = refresh.get("stale_after_hours", self.STALE_AFTER_HOURS)

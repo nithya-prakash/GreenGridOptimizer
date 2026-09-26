@@ -1,9 +1,12 @@
+# Ports are published on 127.0.0.1 only: reachable from this machine, not from
+# the network. To expose the API/dashboard deliberately (e.g. behind a reverse
+# proxy with TLS), change the host part of the mapping — see README "Security".
 services:
   api:
     build: .
     command: uvicorn src.api.main:app --host 0.0.0.0 --port 8000
     ports:
-      - "8000:8000"
+      - "127.0.0.1:8000:8000"
     volumes:
       - ./data:/app/data
       - ./models:/app/models
@@ -21,7 +24,7 @@ services:
     build: .
     command: streamlit run frontend/streamlit_app.py --server.address=0.0.0.0
     ports:
-      - "8501:8501"
+      - "127.0.0.1:8501:8501"
     depends_on:
       - api
     env_file:
@@ -47,11 +50,15 @@ services:
       - PYTHONPATH=/app
     restart: unless-stopped
 
+  # Developer tool, not part of the product: MLflow has no authentication and
+  # accepts tracking writes, so it only starts on request
+  # (`docker compose --profile dev-tools up mlflow`) and only on localhost.
   mlflow:
     build: .
+    profiles: ["dev-tools"]
     command: mlflow ui --host 0.0.0.0 --port 5000 --backend-store-uri sqlite:////app/mlruns/mlflow.db
     ports:
-      - "5000:5000"
+      - "127.0.0.1:5000:5000"
     volumes:
       - ./mlruns:/app/mlruns
     environment:

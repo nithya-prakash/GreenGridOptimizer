@@ -7,7 +7,8 @@ import plotly.express as px
 # In docker-compose, the frontend container reaches the API by service name (api:8000),
 # not localhost. Defaults to localhost for running the frontend directly on the host.
 API_BASE = os.environ.get("API_BASE", "http://localhost:8000")
-# Sent as X-API-Key on /chat when the API requires it (API_AUTH_TOKEN in .env).
+# Sent as X-API-Key on every call: required for /chat, and marks the dashboard as a
+# trusted caller so it isn't throttled by the per-IP read limits (API_AUTH_TOKEN in .env).
 API_AUTH_TOKEN = os.environ.get("API_AUTH_TOKEN", "")
 AUTH_HEADERS = {"X-API-Key": API_AUTH_TOKEN} if API_AUTH_TOKEN else {}
 # Every API call has a timeout so a hung upstream can't freeze the dashboard.
@@ -41,8 +42,8 @@ hours_ahead = st.sidebar.slider("Forecast Horizon (hours)", min_value=1, max_val
 st.sidebar.markdown("---")
 st.sidebar.subheader("Production Model Metrics")
 try:
-    metrics_res = requests.get(f"{API_BASE}/metrics", timeout=TIMEOUT).json()
-    model_info_res = requests.get(f"{API_BASE}/model/info", timeout=TIMEOUT).json()
+    metrics_res = requests.get(f"{API_BASE}/metrics", timeout=TIMEOUT, headers=AUTH_HEADERS).json()
+    model_info_res = requests.get(f"{API_BASE}/model/info", timeout=TIMEOUT, headers=AUTH_HEADERS).json()
 
     for target, model_type in model_info_res['models'].items():
         st.sidebar.write(f"**{target}:** {model_type}")
@@ -72,7 +73,7 @@ except Exception:
     st.sidebar.warning("Could not fetch metrics from API. Ensure backend is running.")
 
 try:
-    backtest_res = requests.get(f"{API_BASE}/backtest", timeout=TIMEOUT)
+    backtest_res = requests.get(f"{API_BASE}/backtest", timeout=TIMEOUT, headers=AUTH_HEADERS)
     backtest_res.raise_for_status()
     by_horizon = backtest_res.json()["targets"][explain_target]["recursive_mae_by_horizon"]
     st.sidebar.caption("Backtest MAE by forecast lead time (recursive, walk-forward)")
@@ -87,7 +88,7 @@ except Exception:
 st.header("Forecast vs Actuals")
 
 try:
-    status = requests.get(f"{API_BASE}/data/status", timeout=TIMEOUT).json()
+    status = requests.get(f"{API_BASE}/data/status", timeout=TIMEOUT, headers=AUTH_HEADERS).json()
     freshness = f"Data through {status['last_data_timestamp'][:16].replace('T', ' ')} UTC ({status['age_hours']:.0f}h ago). The forecast starts from that hour."
     if status["stale"]:
         st.warning(f"{freshness} This is older than {status['stale_after_hours']:.0f}h — the refresh job may not be running.")
@@ -100,12 +101,12 @@ hist_res = {}
 forecast_res = []
 try:
     # Fetch historical
-    hist_res = requests.get(f"{API_BASE}/historical", params={"region": region, "limit": 72}, timeout=TIMEOUT).json()
+    hist_res = requests.get(f"{API_BASE}/historical", params={"region": region, "limit": 72}, timeout=TIMEOUT, headers=AUTH_HEADERS).json()
     df_hist = pd.DataFrame.from_dict(hist_res, orient="index")
     df_hist.index = pd.to_datetime(df_hist.index)
     
     # Fetch forecast
-    forecast_http = requests.get(f"{API_BASE}/forecast", params={"region": region, "hours_ahead": hours_ahead}, timeout=FORECAST_TIMEOUT)
+    forecast_http = requests.get(f"{API_BASE}/forecast", params={"region": region, "hours_ahead": hours_ahead}, timeout=FORECAST_TIMEOUT, headers=AUTH_HEADERS)
     if not forecast_http.ok:
         raise RuntimeError(forecast_http.json().get("detail", f"HTTP {forecast_http.status_code}"))
     forecast_res = forecast_http.json()
@@ -135,7 +136,7 @@ st.header(f"Forecast Explainability (SHAP) — {explain_target}")
 
 explain_res = {}
 try:
-    explain_res = requests.get(f"{API_BASE}/forecast/explain", params={"target": explain_target}, timeout=TIMEOUT).json()
+    explain_res = requests.get(f"{API_BASE}/forecast/explain", params={"target": explain_target}, timeout=TIMEOUT, headers=AUTH_HEADERS).json()
     st.write(
         f"Explaining the 1h-ahead prediction for **{explain_res['prediction_for'][:16]} UTC** "
         f"(the latest hour in the training features): **{explain_res['predicted_mw']:.0f} MW**. "

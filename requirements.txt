@@ -1,5 +1,6 @@
-# Exact versions verified in the Docker image (python:3.12-slim). Unpinned ranges
-# broke this pipeline before (pandas 3 removed fillna(method=...)).
+# Top-level dependencies (what the project uses directly), pinned to the versions
+# verified in the Docker image. The image installs from the full hash-pinned
+# lockfiles in locks/ (generated from this file by scripts/lock.sh).
 pandas==3.0.6
 numpy==2.5.3
 scikit-learn==1.9.1
