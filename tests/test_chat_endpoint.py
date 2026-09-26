@@ -10,14 +10,6 @@ from src.utils.config import settings
 import src.api.routes as routes
 from src.api.schemas import ChatRequest, ChatMessage
 from src.api.main import app
-from src.api.security import chat_rate_limiter
-
-
-@pytest.fixture(autouse=True)
-def _reset_rate_limiter():
-    chat_rate_limiter.reset()
-    yield
-    chat_rate_limiter.reset()
 
 
 def _fake_response(text, stop_reason="end_turn"):

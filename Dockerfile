@@ -8,12 +8,15 @@ RUN apt-get update && apt-get install -y \
     libomp-dev \
     && rm -rf /var/lib/apt/lists/*
 
-# Runtime dependencies only by default; CI builds with INSTALL_DEV=true to get
-# pytest/ruff (see requirements-dev.txt).
+# Installs from a full, hash-pinned lockfile (every transitive dependency) for
+# this CPU architecture — see scripts/lock.sh. Runtime dependencies only by
+# default; CI builds with INSTALL_DEV=true to get pytest/ruff/jupyter.
 ARG INSTALL_DEV=false
-COPY requirements.txt requirements-dev.txt ./
-RUN pip install --no-cache-dir -r requirements.txt \
-    && if [ "$INSTALL_DEV" = "true" ]; then pip install --no-cache-dir -r requirements-dev.txt; fi
+COPY locks/ locks/
+RUN if [ "$INSTALL_DEV" = "true" ]; then KIND=dev; else KIND=runtime; fi; \
+    LOCK="locks/$KIND-$(uname -m).txt"; \
+    if [ ! -f "$LOCK" ]; then echo "No lockfile $LOCK for this architecture; run scripts/lock.sh" >&2; exit 1; fi; \
+    pip install --no-cache-dir --require-hashes -r "$LOCK"
 
 # Copy the project (.dockerignore keeps .env, data/, mlruns/ and .git out of the image)
 COPY . .

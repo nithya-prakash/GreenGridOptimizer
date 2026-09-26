@@ -1,6 +1,8 @@
 from fastapi import APIRouter, HTTPException, Query, Depends
 from typing import List, Dict, Any, Optional
 from datetime import datetime, timedelta, timezone
+from threading import Lock
+import time
 import pandas as pd
 import joblib
 import json
@@ -8,7 +10,7 @@ import sqlite3
 import shap
 import anthropic
 from src.api.schemas import ForecastResponse, ModelInfoResponse, ExplanationResponse, ChatRequest, ChatResponse
-from src.api.security import require_api_token, chat_rate_limit
+from src.api.security import require_api_token, chat_rate_limit, forecast_rate_limit, read_rate_limit
 from src.utils.config import settings
 from src.features.feature_engineering import GENERATION_COLUMNS
 from src.ingestion.weather_client import WeatherClient
@@ -64,6 +66,14 @@ def get_solar_direct_model() -> Optional[Any]:
 def reset_model_cache():
     _cache.clear()
     _models.clear()
+    _forecast_cache.clear()
+
+
+# The full-horizon forecast is computed once and served (sliced) to every request
+# until it expires or the data/models change. Smaller horizons are exact prefixes
+# of the full one: the recursion is deterministic given the same inputs.
+_forecast_cache: Dict[str, Any] = {}
+_forecast_lock = Lock()
 
 
 def _check_region(region: str):
@@ -81,7 +91,7 @@ def read_root():
 def healthcheck():
     return {"status": "healthy"}
 
-@router.get("/data/status")
+@router.get("/data/status", dependencies=[Depends(read_rate_limit)])
 def data_status():
     """How current the served data is. Forecasts start from the last published hour."""
     master_path = settings.PROCESSED_DATA_DIR / "master_dataset.parquet"
@@ -96,13 +106,43 @@ def data_status():
         "stale_after_hours": settings.STALE_AFTER_HOURS,
     }
 
-@router.get("/forecast", response_model=List[ForecastResponse])
+def _compute_full_forecast(models: Dict[str, Any], solar_direct: Any, master_path) -> pd.DataFrame:
+    df = pd.read_parquet(master_path)
+    raw_cols = [c for c in GENERATION_COLUMNS + WeatherClient.WEATHER_COLUMNS + GAP_FLAG_COLUMNS if c in df.columns]
+    history = df[raw_cols].dropna(subset=GENERATION_COLUMNS).tail(settings.FORECAST_HISTORY_HOURS).copy()
+    history.index = pd.to_datetime(history.index)
+    if history.empty:
+        raise HTTPException(status_code=503, detail="Not enough historical data to build a forecast")
+
+    horizon = settings.MAX_FORECAST_HOURS_AHEAD
+    last_known_ts = history.index.max()
+
+    # Every step needs the forecast weather for the hour it predicts (the *_next_1h features).
+    forecast_start = last_known_ts + timedelta(hours=1)
+    forecast_end = last_known_ts + timedelta(hours=horizon)
+    weather_future = WeatherClient().fetch_forecast(forecast_start.date(), forecast_end.date())
+    if weather_future is None or weather_future.empty:
+        raise HTTPException(status_code=503, detail="Could not fetch weather forecast from Open-Meteo")
+
+    expected_hours = pd.date_range(forecast_start, forecast_end, freq="h", tz="UTC")
+    missing = expected_hours.difference(weather_future.dropna().index)
+    if len(missing) > 0:
+        raise HTTPException(
+            status_code=503,
+            detail=f"Weather forecast does not cover the forecast window ({len(missing)} hour(s) missing). "
+                   "Historical data may be stale — check the refresh job."
+        )
+    return recursive_forecast(models, history, weather_future, horizon, solar_direct_model=solar_direct)
+
+
+@router.get("/forecast", response_model=List[ForecastResponse], dependencies=[Depends(forecast_rate_limit)])
 def get_forecast(region: str = "DE", hours_ahead: int = 24):
     """
     Multi-step forecast from the last hour in the dataset (see
     src/models/recursive.py — the same function the backtest evaluates): wind is
     recursive, solar beyond 1h comes from the direct multi-horizon model. Uses
-    live Open-Meteo *forecast* weather for every future hour.
+    live Open-Meteo *forecast* weather for every future hour. Cached for
+    FORECAST_CACHE_MINUTES, and recomputed as soon as the data or models change.
     """
     _check_region(region)
     if not 1 <= hours_ahead <= settings.MAX_FORECAST_HOURS_AHEAD:
@@ -120,32 +160,15 @@ def get_forecast(region: str = "DE", hours_ahead: int = 24):
     if not master_path.exists():
         raise HTTPException(status_code=503, detail="Historical dataset not available")
 
-    df = pd.read_parquet(master_path)
-    raw_cols = [c for c in GENERATION_COLUMNS + WeatherClient.WEATHER_COLUMNS + GAP_FLAG_COLUMNS if c in df.columns]
-    history = df[raw_cols].dropna(subset=GENERATION_COLUMNS).tail(settings.FORECAST_HISTORY_HOURS).copy()
-    history.index = pd.to_datetime(history.index)
-    if history.empty:
-        raise HTTPException(status_code=503, detail="Not enough historical data to build a forecast")
+    key = (master_path.stat().st_mtime, tuple(sorted((name, entry[0]) for name, entry in _cache.items())))
+    with _forecast_lock:  # one computation at a time; concurrent requests wait and reuse it
+        fresh = (_forecast_cache.get("key") == key
+                 and time.monotonic() - _forecast_cache.get("at", 0) < settings.FORECAST_CACHE_MINUTES * 60)
+        if not fresh:
+            _forecast_cache.update(key=key, at=time.monotonic(),
+                                   forecast=_compute_full_forecast(models, solar_direct, master_path))
+        forecast = _forecast_cache["forecast"].head(hours_ahead)
 
-    last_known_ts = history.index.max()
-
-    # Every step needs the forecast weather for the hour it predicts (the *_next_1h features).
-    forecast_start = last_known_ts + timedelta(hours=1)
-    forecast_end = last_known_ts + timedelta(hours=hours_ahead)
-    weather_future = WeatherClient().fetch_forecast(forecast_start.date(), forecast_end.date())
-    if weather_future is None or weather_future.empty:
-        raise HTTPException(status_code=503, detail="Could not fetch weather forecast from Open-Meteo")
-
-    expected_hours = pd.date_range(forecast_start, forecast_end, freq="h", tz="UTC")
-    missing = expected_hours.difference(weather_future.dropna().index)
-    if len(missing) > 0:
-        raise HTTPException(
-            status_code=503,
-            detail=f"Weather forecast does not cover the requested window ({len(missing)} hour(s) missing). "
-                   "Historical data may be stale — re-run the ingestion pipeline."
-        )
-
-    forecast = recursive_forecast(models, history, weather_future, hours_ahead, solar_direct_model=solar_direct)
     return [
         ForecastResponse(
             timestamp=ts,
@@ -156,7 +179,7 @@ def get_forecast(region: str = "DE", hours_ahead: int = 24):
         for ts, row in forecast.iterrows()
     ]
 
-@router.get("/forecast/explain", response_model=ExplanationResponse)
+@router.get("/forecast/explain", response_model=ExplanationResponse, dependencies=[Depends(read_rate_limit)])
 def explain_forecast(target: str = "wind_onshore", timestamp: Optional[str] = None):
     """
     SHAP contributions for one 1h-ahead prediction from the feature dataset: the
@@ -214,7 +237,7 @@ def explain_forecast(target: str = "wind_onshore", timestamp: Optional[str] = No
         feature_contributions={k: float(v) for k, v in top_10},
     )
 
-@router.get("/historical")
+@router.get("/historical", dependencies=[Depends(read_rate_limit)])
 def get_historical(region: str = "DE", limit: int = Query(168, ge=1, le=24 * 365)):
     _check_region(region)
     features_path = settings.PROCESSED_DATA_DIR / "master_dataset.parquet"
@@ -225,7 +248,7 @@ def get_historical(region: str = "DE", limit: int = Query(168, ge=1, le=24 * 365
     df.index = df.index.astype(str)
     return df[['wind_onshore', 'wind_offshore', 'solar']].to_dict(orient="index")
 
-@router.get("/metrics")
+@router.get("/metrics", dependencies=[Depends(read_rate_limit)])
 def get_metrics():
     """Single-holdout (last week) 1h-ahead metrics logged by trainer.py to MLflow."""
     db_path = settings.MLRUNS_DIR / "mlflow.db"
@@ -252,7 +275,7 @@ def get_metrics():
         result[run] = dict(zip(run_data['key'], run_data['value']))
     return result
 
-@router.get("/backtest")
+@router.get("/backtest", dependencies=[Depends(read_rate_limit)])
 def get_backtest():
     """Walk-forward backtest summary (1h-ahead and recursive error by horizon)."""
     path = settings.MODELS_DIR / "backtest_results.json"
@@ -261,7 +284,7 @@ def get_backtest():
     with open(path) as f:
         return json.load(f)
 
-@router.get("/model/info", response_model=ModelInfoResponse)
+@router.get("/model/info", response_model=ModelInfoResponse, dependencies=[Depends(read_rate_limit)])
 def get_model_info():
     models = get_models()
     if not models:

@@ -181,3 +181,36 @@ def test_data_status_reports_age(synthetic_history):
     # The synthetic data ends in August 2026, well past the staleness threshold.
     assert status["stale"] is True
     assert status["last_data_timestamp"].startswith("2026-08-17")
+
+
+def test_forecast_is_cached_and_sliced_for_smaller_horizons(synthetic_history, monkeypatch):
+    routes = synthetic_history
+    calls = []
+
+    def fetch(self, start_date, end_date):
+        calls.append(1)
+        return routes.synthetic_future[WeatherClient.WEATHER_COLUMNS]
+    monkeypatch.setattr(routes.WeatherClient, "fetch_forecast", fetch)
+
+    full = routes.get_forecast(hours_ahead=72)
+    short = routes.get_forecast(hours_ahead=6)
+
+    assert len(calls) == 1  # computed once, reused
+    assert [r.model_dump() for r in short] == [r.model_dump() for r in full[:6]]
+
+
+def test_forecast_cache_is_invalidated_when_data_changes(synthetic_history, monkeypatch):
+    routes = synthetic_history
+    calls = []
+
+    def fetch(self, start_date, end_date):
+        calls.append(1)
+        return routes.synthetic_future[WeatherClient.WEATHER_COLUMNS]
+    monkeypatch.setattr(routes.WeatherClient, "fetch_forecast", fetch)
+
+    routes.get_forecast(hours_ahead=24)
+    master = settings.PROCESSED_DATA_DIR / "master_dataset.parquet"
+    os.utime(master, (master.stat().st_atime, master.stat().st_mtime + 10))  # the refresh job rewrote it
+    routes.get_forecast(hours_ahead=24)
+
+    assert len(calls) == 2

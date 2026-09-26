@@ -41,6 +41,16 @@ weather:
     - {name: north_sea_german_bight, lat: 54.3, lon: 6.5, weight: 0.83}
     - {name: baltic_sea, lat: 54.7, lon: 13.8, weight: 0.17}
 
+api:
+  # Per-client-IP limits on the public read endpoints. Callers presenting a valid
+  # X-API-Key (the dashboard) are trusted and not limited. /forecast is the
+  # expensive one (recursive model + live weather fetch), so it has its own limit.
+  read_rate_limit_per_minute: 120
+  forecast_rate_limit_per_minute: 20
+  # /forecast results are cached for this long (and invalidated when the data or
+  # models change), so repeated requests don't recompute or re-hit Open-Meteo.
+  forecast_cache_minutes: 30
+
 refresh:
   # The `updater` compose service re-ingests data this often, so forecasts start
   # from recent actuals instead of whenever the pipeline was last run by hand.

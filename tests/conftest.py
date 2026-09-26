@@ -6,6 +6,16 @@ from sklearn.ensemble import RandomForestRegressor
 
 from src.utils.config import settings
 from src.features.feature_engineering import create_features
+from src.api.security import chat_rate_limiter, read_rate_limiter
+
+
+@pytest.fixture(autouse=True)
+def _reset_rate_limiters():
+    chat_rate_limiter.reset()
+    read_rate_limiter.reset()
+    yield
+    chat_rate_limiter.reset()
+    read_rate_limiter.reset()
 
 
 def synthetic_raw(n: int = 400, start: str = "2026-08-01") -> pd.DataFrame:

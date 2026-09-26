@@ -63,7 +63,8 @@ What this shows:
 - `notebooks/`: Jupyter notebooks for EDA and model comparison (run with `requirements-dev.txt` installed; both verified to execute against the current data)
 - `src/`: Source code modules (ingestion, preprocessing, features, models, evaluation, explainability, api, jobs, utils)
 - `frontend/`: Streamlit dashboard
-- `tests/`: Pytest suite — 65 tests covering feature engineering (incl. next-hour weather), train/serve parity of the recursive forecaster, the forecast/explain/model-info endpoints, chat hardening (auth, rate limit, input limits, oversized context), backtest folds/origins/baselines, multi-site weather aggregation (incl. circular wind-direction averaging and the radiation timestamp relabelling), lead-matched backtest weather, the refresh job (failure keeps the previous state, no needless retrain), model hot-reload, the SMARD filter-ID mapping, the direct solar model (no data after the origin except weather, training cut-off), data validation (incl. the solar day/night check), config loading, and the ENTSO-E XML parser
+- `locks/`, `scripts/lock.sh`: hash-pinned lockfiles per architecture and the script that regenerates them
+- `tests/`: Pytest suite — 70 tests covering feature engineering (incl. next-hour weather), train/serve parity of the recursive forecaster, the forecast/explain/model-info endpoints, chat hardening (auth, rate limit, input limits, oversized context), backtest folds/origins/baselines, multi-site weather aggregation (incl. circular wind-direction averaging and the radiation timestamp relabelling), lead-matched backtest weather, the refresh job (failure keeps the previous state, no needless retrain), model hot-reload, forecast caching, per-client rate limits on the read endpoints (and the trusted-dashboard exemption), the SMARD filter-ID mapping, the direct solar model (no data after the origin except weather, training cut-off), data validation (incl. the solar day/night check), config loading, and the ENTSO-E XML parser
 - `.github/workflows/`: CI — ruff lint; build the image and run the tests; check that no `.env`/data/`.git` is baked into the image; start the `docker compose` stack on a clean checkout (no `.env`) and check the API and dashboard come up
 
 ## Installation and Docker Instructions
@@ -76,7 +77,7 @@ Ensure you have Docker with Compose v2.24+ installed.
    - `ANTHROPIC_API_KEY` — enables the dashboard's chat feature. Without it, `/chat` returns a clear 503 and the rest of the app is unaffected.
    - `API_AUTH_TOKEN` — shared secret required as the `X-API-Key` header on `/chat`, which spends Anthropic credits. The dashboard sends it automatically. **Required for chat whenever `ANTHROPIC_API_KEY` is set** — chat stays disabled (503) without it, so the key is never exposed unauthenticated.
    - `CORS_ORIGINS` — browser origins allowed to call the API (default `http://localhost:8501`).
-3. Run `docker compose up --build` to start the API (`:8000`), the Streamlit dashboard (`:8501`), the MLflow UI (`:5000`), and the `updater` service. On start-up the updater ingests the last 120 days, builds features and (since no models exist yet) trains them; after that it refreshes the data every 6h and retrains weekly (`refresh:` in `configs/pipeline.yaml`). A failed refresh keeps the last good data and models.
+3. Run `docker compose up --build` to start the API (`:8000`), the Streamlit dashboard (`:8501`) and the `updater` service, all published on `127.0.0.1` only. The MLflow UI is a developer tool and starts only on request: `docker compose --profile dev-tools up mlflow` (`127.0.0.1:5000`). On start-up the updater ingests the last 120 days, builds features and (since no models exist yet) trains them; after that it refreshes the data every 6h and retrains weekly (`refresh:` in `configs/pipeline.yaml`). A failed refresh keeps the last good data and models.
 4. To run the steps by hand instead (inside the `api` container, or locally with `PYTHONPATH=.` and `pip install -r requirements-dev.txt`):
    ```
    python -m src.jobs.refresh --once             # everything below, as the updater does it
@@ -87,11 +88,15 @@ Ensure you have Docker with Compose v2.24+ installed.
    python -m src.explainability.shap_analysis    # optional: SHAP plots per target
    ```
 
-Tests and lint: `docker build --build-arg INSTALL_DEV=true -t greengrid:dev . && docker run --rm greengrid:dev python -m pytest tests/` and `ruff check .`. Dependencies are pinned to the versions verified in the image (`requirements.txt`; dev-only tools in `requirements-dev.txt`).
+Tests and lint: `docker build --build-arg INSTALL_DEV=true -t greengrid:dev . && docker run --rm greengrid:dev python -m pytest tests/` and `ruff check .`.
+
+Dependencies: `requirements.txt` (and `requirements-dev.txt` for tests/lint/notebooks) lists the top-level packages; the image installs from full, hash-pinned lockfiles covering every transitive dependency, one per CPU architecture (`locks/`, x86_64 and aarch64). After changing a top-level pin, regenerate them with `scripts/lock.sh`.
 
 ## Security Notes
 
 - `/chat` is the only endpoint that costs money. It fails closed: it requires a shared token (`API_AUTH_TOKEN`) whenever an Anthropic key is configured, and adds a per-client-IP rate limit (`chat.rate_limit_per_minute`), input-size limits (message, history length, roles), and a context-size cap that rejects oversized requests (413) instead of truncating them. The rate limit is in-process, so each API replica counts separately.
+- The read endpoints (`/forecast`, `/historical`, `/metrics`, …) are public by design for a demo, but rate limited per client IP (`api:` in `configs/pipeline.yaml`; `/forecast`, which runs the model and calls Open-Meteo, has a tighter limit). `/forecast` results are cached and only recomputed when the data or models change, so repeated requests cost ~nothing. The dashboard presents `API_AUTH_TOKEN` and is exempt from these limits (all its users share one IP).
+- All ports are published on `127.0.0.1` only. To serve the dashboard publicly, put it behind a reverse proxy with TLS rather than exposing the containers directly, set `API_AUTH_TOKEN`, and keep MLflow (unauthenticated, accepts writes) private.
 - CORS allows only the origins in `CORS_ORIGINS`.
 - `.dockerignore` keeps `.env`, `data/`, `mlruns/` and `.git` out of the image; CI checks this.
 
