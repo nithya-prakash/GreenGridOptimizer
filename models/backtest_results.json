@@ -1,152 +1,362 @@
 {
-  "wind_onshore": {
-    "folds": [
-      {
-        "MAE": 1669.2000405946799,
-        "RMSE": 2912.6508798860477,
-        "MAPE": 4697.4365567273335,
-        "R2": 0.9760506175112251,
-        "fold": 0,
-        "train_size": 839,
-        "test_start": "2026-08-11 23:00:00+00:00",
-        "test_end": "2026-08-18 22:00:00+00:00"
+  "folds": [
+    {
+      "fold": 0,
+      "train_size": 2053,
+      "test_start": "2026-08-29 13:00:00+00:00",
+      "test_end": "2026-09-05 12:00:00+00:00",
+      "recursive_origins": 24
+    },
+    {
+      "fold": 1,
+      "train_size": 2221,
+      "test_start": "2026-09-05 13:00:00+00:00",
+      "test_end": "2026-09-12 12:00:00+00:00",
+      "recursive_origins": 24
+    },
+    {
+      "fold": 2,
+      "train_size": 2389,
+      "test_start": "2026-09-12 13:00:00+00:00",
+      "test_end": "2026-09-19 12:00:00+00:00",
+      "recursive_origins": 24
+    },
+    {
+      "fold": 3,
+      "train_size": 2557,
+      "test_start": "2026-09-19 13:00:00+00:00",
+      "test_end": "2026-09-26 12:00:00+00:00",
+      "recursive_origins": 14
+    }
+  ],
+  "horizon_hours": 72,
+  "origin_step_hours": 7,
+  "future_weather": "lead-matched: forecasts issued ~lead//24 days before each target hour (Open-Meteo previous runs)",
+  "targets": {
+    "wind_onshore": {
+      "one_step": {
+        "folds": [
+          {
+            "MAE": 1913.1671678524926,
+            "RMSE": 2930.4665505558014,
+            "MAPE": 9.61482840211696,
+            "R2": 0.8964581169038033,
+            "fold": 0,
+            "best_params": {
+              "subsample": 1.0,
+              "n_estimators": 300,
+              "max_depth": 5,
+              "learning_rate": 0.05,
+              "colsample_bytree": 1.0
+            }
+          },
+          {
+            "MAE": 951.591970243908,
+            "RMSE": 1288.0070460889738,
+            "MAPE": 17.303346204528737,
+            "R2": 0.9702891561148563,
+            "fold": 1,
+            "best_params": {
+              "subsample": 1.0,
+              "n_estimators": 300,
+              "max_depth": 5,
+              "learning_rate": 0.05,
+              "colsample_bytree": 1.0
+            }
+          },
+          {
+            "MAE": 676.4630546933129,
+            "RMSE": 940.1083383943519,
+            "MAPE": 9.505572400038675,
+            "R2": 0.9796547098211752,
+            "fold": 2,
+            "best_params": {
+              "subsample": 1.0,
+              "n_estimators": 300,
+              "max_depth": 5,
+              "learning_rate": 0.05,
+              "colsample_bytree": 1.0
+            }
+          },
+          {
+            "MAE": 1020.6348894973029,
+            "RMSE": 1500.084376399477,
+            "MAPE": 13.166539336664748,
+            "R2": 0.9816997800662243,
+            "fold": 3,
+            "best_params": {
+              "subsample": 1.0,
+              "n_estimators": 300,
+              "max_depth": 5,
+              "learning_rate": 0.05,
+              "colsample_bytree": 1.0
+            }
+          }
+        ],
+        "MAE_mean": 1140.464270571754,
+        "MAE_std": 464.3271266581723,
+        "RMSE_mean": 1664.666577859651,
+        "RMSE_std": 757.6598704507538,
+        "R2_mean": 0.9570254407265147,
+        "R2_std": 0.03523220722065895
       },
-      {
-        "MAE": 1183.7920099252747,
-        "RMSE": 2019.904241941576,
-        "MAPE": 34595.72457234518,
-        "R2": 0.9807463668300366,
-        "fold": 1,
-        "train_size": 1007,
-        "test_start": "2026-08-18 23:00:00+00:00",
-        "test_end": "2026-08-25 22:00:00+00:00"
+      "recursive_mae_by_horizon": {
+        "1h": {
+          "MAE_mean": 1341.5525482035791,
+          "MAE_std_across_folds": 536.8757371706572,
+          "n_errors": 86,
+          "persistence_MAE": 1192.3536046511629,
+          "seasonal_naive_MAE": 7950.763720930235
+        },
+        "2-6h": {
+          "MAE_mean": 2959.426642157976,
+          "MAE_std_across_folds": 538.7484205678126,
+          "n_errors": 430,
+          "persistence_MAE": 3526.2093488372093,
+          "seasonal_naive_MAE": 7791.6829069767455
+        },
+        "7-24h": {
+          "MAE_mean": 3966.4912791155043,
+          "MAE_std_across_folds": 970.1190165219729,
+          "n_errors": 1548,
+          "persistence_MAE": 6779.364657622739,
+          "seasonal_naive_MAE": 8045.041976744186
+        },
+        "25-48h": {
+          "MAE_mean": 3782.621226024776,
+          "MAE_std_across_folds": 559.3432559251496,
+          "n_errors": 2064,
+          "persistence_MAE": 9881.401787790697,
+          "seasonal_naive_MAE": 10855.112858527133
+        },
+        "49-72h": {
+          "MAE_mean": 4093.4889317309944,
+          "MAE_std_across_folds": 593.2012827047055,
+          "n_errors": 2064,
+          "persistence_MAE": 10634.01895348837,
+          "seasonal_naive_MAE": 10693.898929263567
+        }
       },
-      {
-        "MAE": 845.5258614118893,
-        "RMSE": 1428.7255267489365,
-        "MAPE": 27360.944170370403,
-        "R2": 0.9912875184505845,
-        "fold": 2,
-        "train_size": 1175,
-        "test_start": "2026-08-25 23:00:00+00:00",
-        "test_end": "2026-09-01 22:00:00+00:00"
+      "mean_actual_mw": 10570.199340013822
+    },
+    "wind_offshore": {
+      "one_step": {
+        "folds": [
+          {
+            "MAE": 418.2377426292782,
+            "RMSE": 540.3755454255756,
+            "MAPE": 13.269708574354308,
+            "R2": 0.7334941148335156,
+            "fold": 0,
+            "best_params": {
+              "subsample": 1.0,
+              "n_estimators": 300,
+              "max_depth": 3,
+              "learning_rate": 0.05,
+              "colsample_bytree": 1.0
+            }
+          },
+          {
+            "MAE": 302.08645307268415,
+            "RMSE": 399.9532971617641,
+            "MAPE": 13.763716372270283,
+            "R2": 0.8675577895894815,
+            "fold": 1,
+            "best_params": {
+              "subsample": 1.0,
+              "n_estimators": 300,
+              "max_depth": 3,
+              "learning_rate": 0.05,
+              "colsample_bytree": 1.0
+            }
+          },
+          {
+            "MAE": 274.5644333321708,
+            "RMSE": 383.94971008901683,
+            "MAPE": 12.122251743621169,
+            "R2": 0.9188775553061397,
+            "fold": 2,
+            "best_params": {
+              "subsample": 1.0,
+              "n_estimators": 300,
+              "max_depth": 3,
+              "learning_rate": 0.05,
+              "colsample_bytree": 1.0
+            }
+          },
+          {
+            "MAE": 314.4108788136074,
+            "RMSE": 433.11366294132205,
+            "MAPE": 64.97183309420491,
+            "R2": 0.9136818716395629,
+            "fold": 3,
+            "best_params": {
+              "subsample": 1.0,
+              "n_estimators": 300,
+              "max_depth": 3,
+              "learning_rate": 0.05,
+              "colsample_bytree": 1.0
+            }
+          }
+        ],
+        "MAE_mean": 327.32487696193516,
+        "MAE_std": 54.43473832132942,
+        "RMSE_mean": 439.34805390441966,
+        "RMSE_std": 60.96381104811399,
+        "R2_mean": 0.8584028328421749,
+        "R2_std": 0.07483141929542118
       },
-      {
-        "MAE": 824.4320977175519,
-        "RMSE": 1410.335433297657,
-        "MAPE": 4267.292564153754,
-        "R2": 0.9919983604437778,
-        "fold": 3,
-        "train_size": 1343,
-        "test_start": "2026-09-01 23:00:00+00:00",
-        "test_end": "2026-09-08 22:00:00+00:00"
-      }
-    ],
-    "MAE_mean": 1130.737502412349,
-    "MAE_std": 342.02535245965896,
-    "RMSE_mean": 1942.904020468554,
-    "RMSE_std": 611.2173976790024,
-    "R2_mean": 0.9850207158089059,
-    "R2_std": 0.0068317834908521976
+      "recursive_mae_by_horizon": {
+        "1h": {
+          "MAE_mean": 316.2183003341319,
+          "MAE_std_across_folds": 38.689611869456414,
+          "n_errors": 86,
+          "persistence_MAE": 327.89627906976744,
+          "seasonal_naive_MAE": 1365.5124418604653
+        },
+        "2-6h": {
+          "MAE_mean": 591.994304611561,
+          "MAE_std_across_folds": 128.03780766809746,
+          "n_errors": 430,
+          "persistence_MAE": 772.6480465116279,
+          "seasonal_naive_MAE": 1410.6888837209303
+        },
+        "7-24h": {
+          "MAE_mean": 794.103827711199,
+          "MAE_std_across_folds": 67.01938516851445,
+          "n_errors": 1548,
+          "persistence_MAE": 1355.986879844961,
+          "seasonal_naive_MAE": 1436.6183010335917
+        },
+        "25-48h": {
+          "MAE_mean": 857.3402827283578,
+          "MAE_std_across_folds": 68.63885808719793,
+          "n_errors": 2064,
+          "persistence_MAE": 1416.6564437984496,
+          "seasonal_naive_MAE": 1483.4943168604655
+        },
+        "49-72h": {
+          "MAE_mean": 863.334142861773,
+          "MAE_std_across_folds": 113.3266143228519,
+          "n_errors": 2064,
+          "persistence_MAE": 1490.0953003875968,
+          "seasonal_naive_MAE": 1547.478144379845
+        }
+      },
+      "mean_actual_mw": 2496.3541292328955
+    },
+    "solar": {
+      "one_step": {
+        "folds": [
+          {
+            "MAE": 1486.4581186563487,
+            "RMSE": 2464.616172291068,
+            "MAPE": 4201.242352429298,
+            "R2": 0.9711398413255418,
+            "fold": 0,
+            "best_params": {
+              "subsample": 1.0,
+              "n_estimators": 300,
+              "max_depth": 5,
+              "learning_rate": 0.05,
+              "colsample_bytree": 1.0
+            }
+          },
+          {
+            "MAE": 900.1577599256786,
+            "RMSE": 1504.8115711972423,
+            "MAPE": 10180.908963098771,
+            "R2": 0.9911515033608176,
+            "fold": 1,
+            "best_params": {
+              "subsample": 1.0,
+              "n_estimators": 300,
+              "max_depth": 5,
+              "learning_rate": 0.05,
+              "colsample_bytree": 1.0
+            }
+          },
+          {
+            "MAE": 886.9549826069107,
+            "RMSE": 1571.8234458854163,
+            "MAPE": 33621.0491503484,
+            "R2": 0.9870279888284179,
+            "fold": 2,
+            "best_params": {
+              "subsample": 1.0,
+              "n_estimators": 300,
+              "max_depth": 5,
+              "learning_rate": 0.05,
+              "colsample_bytree": 1.0
+            }
+          },
+          {
+            "MAE": 1137.1296499076348,
+            "RMSE": 1965.9918175055618,
+            "MAPE": 2220.458844161758,
+            "R2": 0.984564635880854,
+            "fold": 3,
+            "best_params": {
+              "subsample": 1.0,
+              "n_estimators": 300,
+              "max_depth": 5,
+              "learning_rate": 0.05,
+              "colsample_bytree": 1.0
+            }
+          }
+        ],
+        "MAE_mean": 1102.6751277741432,
+        "MAE_std": 242.91200232655265,
+        "RMSE_mean": 1876.810751719822,
+        "RMSE_std": 382.38368230653487,
+        "R2_mean": 0.9834709923489079,
+        "R2_std": 0.00749826338386669
+      },
+      "recursive_mae_by_horizon": {
+        "1h": {
+          "MAE_mean": 1055.53949565089,
+          "MAE_std_across_folds": 264.9843768102071,
+          "n_errors": 86,
+          "persistence_MAE": 3009.028255813954,
+          "seasonal_naive_MAE": 2651.380930232558
+        },
+        "2-6h": {
+          "MAE_mean": 1325.9985975117152,
+          "MAE_std_across_folds": 196.8716537135068,
+          "n_errors": 430,
+          "persistence_MAE": 12031.324209302325,
+          "seasonal_naive_MAE": 2695.450488372093
+        },
+        "7-24h": {
+          "MAE_mean": 1358.5303693682858,
+          "MAE_std_across_folds": 222.4289077755694,
+          "n_errors": 1548,
+          "persistence_MAE": 17100.563010335918,
+          "seasonal_naive_MAE": 2679.588578811369
+        },
+        "25-48h": {
+          "MAE_mean": 1568.1482821593097,
+          "MAE_std_across_folds": 56.33355090173287,
+          "n_errors": 2064,
+          "persistence_MAE": 15554.82105620155,
+          "seasonal_naive_MAE": 3100.2176114341087
+        },
+        "49-72h": {
+          "MAE_mean": 1617.7701006731977,
+          "MAE_std_across_folds": 200.76258576995193,
+          "n_errors": 2064,
+          "persistence_MAE": 15636.51378875969,
+          "seasonal_naive_MAE": 2980.379093992248
+        }
+      },
+      "mean_actual_mw": 14901.097968210091
+    }
   },
-  "wind_offshore": {
-    "folds": [
-      {
-        "MAE": 340.0952375430153,
-        "RMSE": 404.39517139788205,
-        "MAPE": 10.51938383683831,
-        "R2": 0.9015664649461239,
-        "fold": 0,
-        "train_size": 839,
-        "test_start": "2026-08-11 23:00:00+00:00",
-        "test_end": "2026-08-18 22:00:00+00:00"
-      },
-      {
-        "MAE": 284.0982217116583,
-        "RMSE": 356.9060387871079,
-        "MAPE": 25.16482317966914,
-        "R2": 0.9428343236563649,
-        "fold": 1,
-        "train_size": 1007,
-        "test_start": "2026-08-18 23:00:00+00:00",
-        "test_end": "2026-08-25 22:00:00+00:00"
-      },
-      {
-        "MAE": 206.42817274547758,
-        "RMSE": 285.43481958774754,
-        "MAPE": 13.025312480649184,
-        "R2": 0.9589765034076285,
-        "fold": 2,
-        "train_size": 1175,
-        "test_start": "2026-08-25 23:00:00+00:00",
-        "test_end": "2026-09-01 22:00:00+00:00"
-      },
-      {
-        "MAE": 209.54203555879135,
-        "RMSE": 268.0201680001078,
-        "MAPE": 10.33612944387177,
-        "R2": 0.9555102220872315,
-        "fold": 3,
-        "train_size": 1343,
-        "test_start": "2026-09-01 23:00:00+00:00",
-        "test_end": "2026-09-08 22:00:00+00:00"
-      }
-    ],
-    "MAE_mean": 260.0409168897356,
-    "MAE_std": 55.704379363088435,
-    "RMSE_mean": 328.68904944321133,
-    "RMSE_std": 54.95283651686166,
-    "R2_mean": 0.9397218785243373,
-    "R2_std": 0.022833830558409554
-  },
-  "solar": {
-    "folds": [
-      {
-        "MAE": 359.88692509605767,
-        "RMSE": 529.6758292575953,
-        "MAPE": 543.7369881268329,
-        "R2": 0.9068025243522511,
-        "fold": 0,
-        "train_size": 839,
-        "test_start": "2026-08-11 23:00:00+00:00",
-        "test_end": "2026-08-18 22:00:00+00:00"
-      },
-      {
-        "MAE": 422.26716484978084,
-        "RMSE": 640.744373296965,
-        "MAPE": 329.27742867333995,
-        "R2": 0.8530990143083051,
-        "fold": 1,
-        "train_size": 1007,
-        "test_start": "2026-08-18 23:00:00+00:00",
-        "test_end": "2026-08-25 22:00:00+00:00"
-      },
-      {
-        "MAE": 460.8585332743326,
-        "RMSE": 669.0549615491772,
-        "MAPE": 529.1200638769894,
-        "R2": 0.8455377912937285,
-        "fold": 2,
-        "train_size": 1175,
-        "test_start": "2026-08-25 23:00:00+00:00",
-        "test_end": "2026-09-01 22:00:00+00:00"
-      },
-      {
-        "MAE": 434.2143502825782,
-        "RMSE": 669.359639107067,
-        "MAPE": 415.56366219310075,
-        "R2": 0.8259115022054372,
-        "fold": 3,
-        "train_size": 1343,
-        "test_start": "2026-09-01 23:00:00+00:00",
-        "test_end": "2026-09-08 22:00:00+00:00"
-      }
-    ],
-    "MAE_mean": 419.3067433756873,
-    "MAE_std": 37.041419003461606,
-    "RMSE_mean": 627.2087008027011,
-    "RMSE_std": 57.49714471194766,
-    "R2_mean": 0.8578377080399305,
-    "R2_std": 0.029960720225536024
+  "solar_direct_model_mae_by_horizon": {
+    "1h": 1314.5837979613902,
+    "2-6h": 1325.9985975117152,
+    "7-24h": 1358.5303693682858,
+    "25-48h": 1568.1482821593097,
+    "49-72h": 1617.7701006731977
   }
 }
