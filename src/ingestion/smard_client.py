@@ -4,6 +4,8 @@ from typing import Optional, List
 from datetime import datetime, date, timezone
 from src.utils.logger import log
 
+REQUEST_TIMEOUT_SECONDS = 30
+
 class SMARDClient:
     """Fallback client to fetch actual generation data from SMARD."""
     
@@ -11,18 +13,22 @@ class SMARDClient:
     REGION_DE = "DE"
     RESOLUTION = "hour"
     
-    # Filter IDs for realised generation
+    # SMARD filter IDs for realised generation. These were previously 4068/4069/4070,
+    # which are actually photovoltaics / hard coal / pumped storage — so "wind_onshore"
+    # was really solar, "wind_offshore" hard coal and "solar" pumped storage. Checked
+    # against the live data's diurnal profile: 4067 has no day/night cycle, 4068 is
+    # 0 MW at night and peaks at midday, 1225 peaks at ~6 GW (installed offshore capacity).
     FILTERS = {
-        "wind_onshore": "4068",
-        "wind_offshore": "4069",
-        "solar": "4070"
+        "wind_onshore": "4067",
+        "wind_offshore": "1225",
+        "solar": "4068"
     }
 
     def _get_index(self, filter_id: str) -> Optional[List[int]]:
         """Get the available timestamps (chunks) for a filter."""
         url = f"{self.BASE_URL}/{filter_id}/{self.REGION_DE}/index_{self.RESOLUTION}.json"
         try:
-            resp = requests.get(url)
+            resp = requests.get(url, timeout=REQUEST_TIMEOUT_SECONDS)
             resp.raise_for_status()
             return resp.json().get("timestamps", [])
         except requests.RequestException as e:
@@ -33,7 +39,7 @@ class SMARDClient:
         """Fetch data series for a specific timestamp chunk."""
         url = f"{self.BASE_URL}/{filter_id}/{self.REGION_DE}/{filter_id}_{self.REGION_DE}_{self.RESOLUTION}_{timestamp}.json"
         try:
-            resp = requests.get(url)
+            resp = requests.get(url, timeout=REQUEST_TIMEOUT_SECONDS)
             resp.raise_for_status()
             data = resp.json().get("series", [])
             if not data:
