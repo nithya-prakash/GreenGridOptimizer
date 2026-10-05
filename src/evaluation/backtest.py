@@ -9,6 +9,7 @@ import matplotlib.pyplot as plt
 from src.utils.logger import log
 from src.utils.config import settings
 from src.evaluation.metrics import calculate_metrics
+from src.evaluation.intervals import build_intervals
 from src.features.feature_engineering import GENERATION_COLUMNS
 from src.models.xgboost_model import XGBoostForecaster
 from src.models.recursive import recursive_forecast, GAP_FLAG_COLUMNS
@@ -227,6 +228,15 @@ def run_backtest(n_folds: int = settings.BACKTEST_FOLDS, test_size: int = settin
                  ", ".join(f"{k}={v['MAE_mean']:.0f}/{v['persistence_MAE']:.0f}/{v['seasonal_naive_MAE']:.0f}"
                            for k, v in by_horizon.items()))
         _plot_target(target, folds, by_horizon)
+
+    if not all_errors.empty and all_errors["fold"].nunique() >= 2:
+        intervals = build_intervals(all_errors, GENERATION_COLUMNS, HORIZON_BUCKETS, horizon)
+        summary["intervals"] = intervals
+        with open(settings.MODELS_DIR / "forecast_intervals.json", "w") as f:
+            json.dump(intervals, f, indent=2)
+        for t, buckets in intervals["targets"].items():
+            log.info(f"{t} {1 - intervals['alpha']:.0%} interval held-out coverage: " +
+                     ", ".join(f"{k}={v['held_out_coverage']:.0%}" for k, v in buckets.items() if v["held_out_coverage"] is not None))
 
     output_path = settings.MODELS_DIR / "backtest_results.json"
     with open(output_path, "w") as f:

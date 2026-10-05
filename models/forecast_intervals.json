@@ -1,0 +1,123 @@
+{
+  "alpha": 0.1,
+  "method": "split conformal on walk-forward absolute errors, per lead-time bucket",
+  "calibration_folds_for_coverage": [
+    0,
+    1,
+    2
+  ],
+  "held_out_fold": 3,
+  "targets": {
+    "wind_onshore": {
+      "1-1": {
+        "lo": 1,
+        "hi": 1,
+        "halfwidth_mw": 3529.4456250000003,
+        "held_out_coverage": 1.0,
+        "n_calibration": 86
+      },
+      "2-6": {
+        "lo": 2,
+        "hi": 6,
+        "halfwidth_mw": 6396.551953124999,
+        "held_out_coverage": 0.9714285714285714,
+        "n_calibration": 430
+      },
+      "7-24": {
+        "lo": 7,
+        "hi": 24,
+        "halfwidth_mw": 7823.59359375,
+        "held_out_coverage": 1.0,
+        "n_calibration": 1548
+      },
+      "25-48": {
+        "lo": 25,
+        "hi": 48,
+        "halfwidth_mw": 7058.660234375,
+        "held_out_coverage": 0.9553571428571429,
+        "n_calibration": 2064
+      },
+      "49-72": {
+        "lo": 49,
+        "hi": 72,
+        "halfwidth_mw": 7079.2280859375005,
+        "held_out_coverage": 0.9077380952380952,
+        "n_calibration": 2064
+      }
+    },
+    "wind_offshore": {
+      "1-1": {
+        "lo": 1,
+        "hi": 1,
+        "halfwidth_mw": 821.6707470703127,
+        "held_out_coverage": 0.7857142857142857,
+        "n_calibration": 86
+      },
+      "2-6": {
+        "lo": 2,
+        "hi": 6,
+        "halfwidth_mw": 1423.63826171875,
+        "held_out_coverage": 0.8857142857142857,
+        "n_calibration": 430
+      },
+      "7-24": {
+        "lo": 7,
+        "hi": 24,
+        "halfwidth_mw": 1547.1145507812498,
+        "held_out_coverage": 0.7658730158730159,
+        "n_calibration": 1548
+      },
+      "25-48": {
+        "lo": 25,
+        "hi": 48,
+        "halfwidth_mw": 1678.6051611328126,
+        "held_out_coverage": 0.8303571428571429,
+        "n_calibration": 2064
+      },
+      "49-72": {
+        "lo": 49,
+        "hi": 72,
+        "halfwidth_mw": 1845.2005468749999,
+        "held_out_coverage": 0.9732142857142857,
+        "n_calibration": 2064
+      }
+    },
+    "solar": {
+      "1-1": {
+        "lo": 1,
+        "hi": 1,
+        "halfwidth_mw": 3978.009296875003,
+        "held_out_coverage": 0.8571428571428571,
+        "n_calibration": 86
+      },
+      "2-6": {
+        "lo": 2,
+        "hi": 6,
+        "halfwidth_mw": 4489.6471484375,
+        "held_out_coverage": 0.8714285714285714,
+        "n_calibration": 430
+      },
+      "7-24": {
+        "lo": 7,
+        "hi": 24,
+        "halfwidth_mw": 4398.17203125,
+        "held_out_coverage": 0.8492063492063492,
+        "n_calibration": 1548
+      },
+      "25-48": {
+        "lo": 25,
+        "hi": 48,
+        "halfwidth_mw": 5127.360156249997,
+        "held_out_coverage": 0.9107142857142857,
+        "n_calibration": 2064
+      },
+      "49-72": {
+        "lo": 49,
+        "hi": 72,
+        "halfwidth_mw": 5498.743046874999,
+        "held_out_coverage": 0.8452380952380952,
+        "n_calibration": 2064
+      }
+    }
+  }
+}
