@@ -27,6 +27,12 @@ Data Source (SMARD generation + Open-Meteo multi-site weather) → Ingestion Pip
 - **Chat**: ask questions about the current forecast in plain language ("why is wind onshore low tomorrow morning?") — answered by Claude grounded in the forecast/actuals/SHAP data the dashboard is already showing. Optional — the rest of the app works without an API key.
 - **Validation**: walk-forward backtest that evaluates the forecast actually served (recursive, out to 72h) against persistence and seasonal-naive baselines, with hyperparameters re-tuned inside each fold — see Model Performance below. Ingestion also checks the data's physics (solar must be ~0 at night), not just its schema.
 
+### Prediction intervals and battery dispatch
+
+`/forecast` returns a 90% split-conformal interval per target and hour (`*_lower_mw`, `*_upper_mw`, `interval_confidence`). Half-widths are quantiles of the backtest's absolute errors per lead-time bucket and are written to `models/forecast_intervals.json` by `python -m src.evaluation.backtest`. Coverage is checked on a held-out fold (calibrated on earlier folds): wind onshore 91-100%, wind offshore 77-97%, solar 85-91% against a 90% target. Offshore and solar sometimes under-cover because the held-out week differs from the calibration weeks, and only one week is held out, so treat the intervals as approximate. Re-running the backtest on a refreshed dataset shifts the fold windows and therefore the numbers.
+
+`/forecast/dispatch?power_mw=...&capacity_mwh=...` schedules a battery to firm the forecast total toward its mean, as a linear program (`src/optimization/dispatch.py`, `scipy.optimize.linprog`, energy-neutral over the horizon, with round-trip losses). It is firming of the *forecast*, not price arbitrage; real gains depend on forecast error.
+
 ## Model Performance
 
 Walk-forward backtest (`src/evaluation/backtest.py`; full results in `models/backtest_results.json`, plots in `models/backtest_*.png`): 120 days of data (2026-05-29 to 2026-09-26), 4 expanding-window folds with a 1-week test window each, and all models (incl. XGBoost hyperparameters and the direct solar model) re-trained on each fold's training data only. Within each test week the served forecast is started from an origin every 7h (so every hour of the day is an origin once) and run 72h ahead — 86 forecast runs in total.

@@ -15,6 +15,8 @@ from src.utils.config import settings
 from src.features.feature_engineering import GENERATION_COLUMNS
 from src.ingestion.weather_client import WeatherClient
 from src.models.recursive import recursive_forecast, GAP_FLAG_COLUMNS
+from src.evaluation.intervals import halfwidth_for_lead
+from src.optimization.dispatch import Battery, optimize_dispatch
 
 # Forecast history/horizon, chat model and chat limits are non-secret pipeline
 # parameters — see configs/pipeline.yaml.
@@ -62,6 +64,15 @@ def get_models() -> Dict[str, Any]:
 def get_solar_direct_model() -> Optional[Any]:
     """The direct multi-horizon solar model (leads 2..72h), if trained."""
     return _load("solar_direct")
+
+def _load_intervals() -> Dict[str, Any]:
+    """Conformal half-widths written by the backtest, or {} if it hasn't produced them."""
+    path = settings.MODELS_DIR / "forecast_intervals.json"
+    try:
+        return json.loads(path.read_text())
+    except (OSError, ValueError):
+        return {}
+
 
 def reset_model_cache():
     _cache.clear()
@@ -169,15 +180,43 @@ def get_forecast(region: str = "DE", hours_ahead: int = 24):
                                    forecast=_compute_full_forecast(models, solar_direct, master_path))
         forecast = _forecast_cache["forecast"].head(hours_ahead)
 
-    return [
-        ForecastResponse(
+    intervals = _load_intervals()
+    confidence = 1 - intervals["alpha"] if intervals else None
+    results = []
+    for lead, (ts, row) in enumerate(forecast.iterrows(), start=1):
+        bounds = {}
+        for target in TARGETS:
+            hw = halfwidth_for_lead(intervals, target, lead)
+            if hw is not None:  # generation can't be negative
+                bounds[f"{target}_lower_mw"] = max(0.0, row[target] - hw)
+                bounds[f"{target}_upper_mw"] = row[target] + hw
+        results.append(ForecastResponse(
             timestamp=ts,
             wind_onshore_mw=row["wind_onshore"],
             wind_offshore_mw=row["wind_offshore"],
             solar_mw=row["solar"],
-        )
-        for ts, row in forecast.iterrows()
-    ]
+            interval_confidence=confidence if bounds else None,
+            **bounds,
+        ))
+    return results
+
+@router.get("/forecast/dispatch", dependencies=[Depends(forecast_rate_limit)])
+def get_dispatch(hours_ahead: int = 24, power_mw: float = Query(..., gt=0), capacity_mwh: float = Query(..., gt=0),
+                 round_trip_efficiency: float = Query(0.9, gt=0, le=1)):
+    """
+    Battery schedule that firms the forecast total (wind + solar) toward its mean,
+    solved as a linear program (src/optimization/dispatch.py). Firming of the
+    *forecast*, not price arbitrage; real gains depend on forecast error.
+    """
+    forecast = get_forecast(hours_ahead=hours_ahead)
+    total = pd.Series([r.wind_onshore_mw + r.wind_offshore_mw + r.solar_mw for r in forecast],
+                      index=[r.timestamp for r in forecast])
+    result = optimize_dispatch(total, Battery(power_mw, capacity_mwh, round_trip_efficiency))
+    schedule = result.pop("schedule")
+    return {**result, "battery": {"power_mw": power_mw, "capacity_mwh": capacity_mwh,
+                                  "round_trip_efficiency": round_trip_efficiency},
+            "schedule": [{"timestamp": ts, **row} for ts, row in schedule.round(3).to_dict(orient="index").items()]}
+
 
 @router.get("/forecast/explain", response_model=ExplanationResponse, dependencies=[Depends(read_rate_limit)])
 def explain_forecast(target: str = "wind_onshore", timestamp: Optional[str] = None):

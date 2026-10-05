@@ -11,6 +11,14 @@ class ForecastResponse(BaseModel):
     wind_onshore_mw: float
     wind_offshore_mw: float
     solar_mw: float
+    # Conformal intervals (see src/evaluation/intervals.py); None if models/forecast_intervals.json is absent.
+    wind_onshore_lower_mw: Optional[float] = None
+    wind_onshore_upper_mw: Optional[float] = None
+    wind_offshore_lower_mw: Optional[float] = None
+    wind_offshore_upper_mw: Optional[float] = None
+    solar_lower_mw: Optional[float] = None
+    solar_upper_mw: Optional[float] = None
+    interval_confidence: Optional[float] = None
 
 class HistoricalRequest(BaseModel):
     region: str = "DE"
