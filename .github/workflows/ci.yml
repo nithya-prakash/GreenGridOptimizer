@@ -32,6 +32,17 @@ jobs:
         run: |
           docker run --rm greengrid-optimizer:ci sh -c 'test ! -e /app/.env && test ! -e /app/data && test ! -e /app/.git'
 
+  kubernetes:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install kubeconform
+        run: |
+          curl -sSL https://github.com/yannh/kubeconform/releases/download/v0.7.0/kubeconform-linux-amd64.tar.gz | tar xz kubeconform
+          sudo mv kubeconform /usr/local/bin/
+      - name: Render and validate manifests
+        run: kubectl kustomize k8s | kubeconform -strict -summary -kubernetes-version 1.30.0
+
   compose-smoke:
     # Proves the documented `docker compose up` path starts on a fresh clone with
     # no .env file and no trained models (API healthy, dashboard serving).

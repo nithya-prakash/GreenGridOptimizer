@@ -1,0 +1,4 @@
+target,label,mean_actual_mw
+wind_onshore,Wind onshore,10570.2
+wind_offshore,Wind offshore,2496.4
+solar,Solar,14901.1

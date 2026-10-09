@@ -214,3 +214,25 @@ def test_forecast_cache_is_invalidated_when_data_changes(synthetic_history, monk
     routes.get_forecast(hours_ahead=24)
 
     assert len(calls) == 2
+
+
+def test_get_models_is_safe_under_concurrent_calls(monkeypatch):
+    """Regression: a shared dict cleared/refilled per call exposed partial model sets to
+    concurrent requests (KeyError 'solar' under load)."""
+    import time
+    from concurrent.futures import ThreadPoolExecutor
+
+    from src.api import routes
+
+    def slow_load(name):
+        time.sleep(0.002)
+        return object()
+
+    monkeypatch.setattr(routes, "_load", slow_load)
+    def complete(_):
+        models = routes.get_models()
+        time.sleep(0.005)  # the caller uses the result after other requests have run
+        return set(models) == set(routes.TARGETS)
+
+    with ThreadPoolExecutor(8) as ex:
+        assert all(ex.map(complete, range(64)))
