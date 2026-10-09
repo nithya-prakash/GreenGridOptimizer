@@ -28,8 +28,8 @@ MAE in MW by lead time: model ± std across folds / persistence / seasonal naive
 
 | Check | Result |
 |---|---|
-| Tests | 73 pass, `ruff check .` clean |
-| Load test (20 users, 60 s, local, M4) | 1217 requests, **0 errors**, 20.6 req/s, median 8 ms, p95 140 ms, p99 390 ms; first uncached `/forecast` up to 3.9 s |
+| Tests | 86 pass, `ruff check .` clean |
+| Load test (20 users, 60 s, local, M4) | 1234 requests, **0 errors**, 20.9 req/s, median 9 ms, p95 150 ms, p99 330 ms; first uncached `/forecast` up to 4.4 s |
 | Kubernetes manifests | `kubeconform` valid (6 resources); **never applied to a cluster** |
 | Live ENTSO-E, live Claude chat | **not tested** (no keys) |
 
@@ -67,6 +67,8 @@ flowchart LR
 - **Wind**: recursive; each step predicts t+1 and feeds it back (`src/models/recursive.py`, the function the backtest evaluates).
 - **Solar**: 1h model for the first step, then a direct multi-horizon model (`src/models/solar_direct.py`). Recursive solar lost to seasonal naive beyond about 6h.
 - **MLflow**: `src/models/trainer.py` logs one run per model and source (experiment `GreenGrid_Forecasting`, `mlruns/mlflow.db`): MAE, MAPE, R2, RMSE plus `model_type`, `use_regressors` and XGBoost hyperparameters. No model artifacts are logged; the served model is a pickle in `models/production/`.
+- **Prediction intervals**: `/forecast` also returns a 90% split-conformal interval per target and hour (`*_lower_mw`, `*_upper_mw`), from quantiles of the backtest's absolute errors per lead-time bucket (`models/forecast_intervals.json`, written by the backtest). Coverage on one held-out fold, calibrated on earlier folds: onshore 91-100%, offshore 77-97%, solar 85-91% against a 90% target. Only one week is held out, so treat the intervals as approximate.
+- **Battery dispatch**: `/forecast/dispatch?power_mw=...&capacity_mwh=...` schedules a battery to firm the forecast total toward its mean, as a linear program (`src/optimization/dispatch.py`, `scipy.optimize.linprog`, energy-neutral, with round-trip losses). It firms the *forecast*, not price arbitrage; real gains depend on forecast error.
 - **Chat**: answers questions grounded in the forecast, actuals and SHAP data on screen.
 
 Stack: FastAPI, Streamlit, XGBoost, Prophet, SHAP, MLflow, Docker Compose.
@@ -76,6 +78,7 @@ Stack: FastAPI, Streamlit, XGBoost, Prophet, SHAP, MLflow, Docker Compose.
 ```bash
 curl "localhost:8000/forecast?hours_ahead=48"
 curl "localhost:8000/forecast/explain?target=solar"
+curl "localhost:8000/forecast/dispatch?power_mw=500&capacity_mwh=1000"
 curl localhost:8000/historical?limit=168    # also: /backtest /metrics /model/info /data/status
 curl -X POST localhost:8000/chat -H "X-API-Key: $API_AUTH_TOKEN" -H 'content-type: application/json' -d '{"message": "Why is solar low tomorrow?"}'
 python -m src.jobs.refresh --once           # ingest, features, train, as the updater does
@@ -87,7 +90,7 @@ API docs at http://localhost:8000/docs. **Power BI / Tableau**: `python -m scrip
 ## Evaluation method
 
 - **Two data bugs the evaluation surfaced, both fixed.** (1) Until 2026-09-26 the SMARD client used wrong filter IDs: "onshore" was photovoltaics, "offshore" hard coal, "solar" pumped storage. (2) Open-Meteo labels radiation by the end of the hour, SMARD by the start, so the join was one hour off; fixing it raised 1h solar MAE from about 840 to 1060 MW and improved every other lead.
-- **Load test** (`loadtest/locustfile.py`): mixed read traffic, 20 users, 60 s, one uvicorn process on an M4, `API_AUTH_TOKEN` set so the rate limiter is not measured. Median / p95 ms: `/forecast` 7 / 120, `/forecast/explain` 72 / 200, `/historical` 14 / 82. `/forecast` p99 (2.5 s) is the first uncached computation, which calls Open-Meteo. Not a capacity number.
+- **Load test** (`loadtest/locustfile.py`): mixed read traffic, 20 users, 60 s, one uvicorn process on an M4, `API_AUTH_TOKEN` set so the rate limiter is not measured. Median / p95 ms: `/forecast` 7 / 110, `/forecast/explain` 73 / 210, `/historical` 12 / 78. `/forecast` p99 (2.0 s) is the first uncached computation, which calls Open-Meteo. Not a capacity number.
 - The first run found a real bug: concurrent requests saw a half-filled model dict and `/forecast` returned 500. Fixed in `src/api/routes.py` with a regression test; the numbers above are after the fix.
 
 ```bash
@@ -98,7 +101,7 @@ pip install locust && API_AUTH_TOKEN=... locust -f loadtest/locustfile.py --host
 
 | Feature | Status |
 |---|---|
-| SMARD + Open-Meteo ingestion, recursive wind and direct solar forecasting, SHAP, updater service | implemented, tested, backtested |
+| SMARD + Open-Meteo ingestion, recursive wind and direct solar forecasting, SHAP, conformal intervals, battery dispatch LP, updater service | implemented, tested, backtested |
 | MLflow tracking | implemented (metrics and parameters only) |
 | BI export | implemented, tested; no `.pbix` |
 | Kubernetes manifests | validated with `kubeconform` only; **not applied to a cluster** |
