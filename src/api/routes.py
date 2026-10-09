@@ -37,7 +37,6 @@ router = APIRouter()
 
 # In-memory model cache: name -> (file mtime, model). Reloaded when the file
 # changes, so models retrained by the refresh job are picked up without a restart.
-_models: Dict[str, Any] = {}
 _cache: Dict[str, tuple] = {}
 
 def _load(name: str) -> Optional[Any]:
@@ -52,12 +51,14 @@ def _load(name: str) -> Optional[Any]:
 
 def get_models() -> Dict[str, Any]:
     """The 1h-ahead production model for each target that has been trained."""
-    _models.clear()
+    # A fresh dict per call: endpoints run in a thread pool, and a shared dict that is
+    # cleared and refilled lets a concurrent request see a half-filled model set.
+    models = {}
     for target in TARGETS:
         model = _load(target)
         if model is not None:
-            _models[target] = model
-    return _models
+            models[target] = model
+    return models
 
 def get_solar_direct_model() -> Optional[Any]:
     """The direct multi-horizon solar model (leads 2..72h), if trained."""
@@ -65,7 +66,6 @@ def get_solar_direct_model() -> Optional[Any]:
 
 def reset_model_cache():
     _cache.clear()
-    _models.clear()
     _forecast_cache.clear()
 
 
